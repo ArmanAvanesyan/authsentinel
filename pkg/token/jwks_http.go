@@ -98,7 +98,7 @@ func (s *HTTPJWKSSource) fetchURL(ctx context.Context, url string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("get %s: status %d", url, resp.StatusCode)
 	}

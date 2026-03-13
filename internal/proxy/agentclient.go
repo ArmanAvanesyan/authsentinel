@@ -47,7 +47,7 @@ func (c *AgentClient) Resolve(ctx context.Context, sessionCookie string) (*Resol
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, nil
 	}
