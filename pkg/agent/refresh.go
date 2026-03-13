@@ -1,11 +1,14 @@
 package agent
 
-// RefreshRequest holds refresh token or session cookie for refresh.
+// RefreshRequest holds session cookie for refresh.
 type RefreshRequest struct {
-	// TODO: add fields (refresh token/session cookie, etc.).
+	SessionCookie string
 }
 
-// RefreshResponse holds new tokens and updated cookies after refresh.
+// RefreshResponse holds updated cookie after refresh (or 401 when invalid/expired).
 type RefreshResponse struct {
-	// TODO: add fields (new tokens, updated cookies, etc.).
+	// SetCookieValue is the new session cookie value when tokens were refreshed.
+	SetCookieValue string
+	// Refreshed is true when a new cookie was issued.
+	Refreshed bool
 }

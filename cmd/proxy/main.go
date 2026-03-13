@@ -9,19 +9,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ArmanAvanesyan/authsentinel/internal/proxy"
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy/config"
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy/httpserver"
 )
 
 func main() {
 	logger := log.New(os.Stdout, "[authsentinel-proxy] ", log.LstdFlags|log.LUTC)
-	logger.Println("starting AuthSentinel Proxy (skeleton)")
+	logger.Println("starting AuthSentinel Proxy")
 
-	_, _ = config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatalf("config load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		logger.Fatalf("config invalid: %v", err)
+	}
+
+	client := proxy.NewAgentClient(cfg.AgentURL, cfg.CookieName)
 
 	srv := &http.Server{
-		Addr:    ":8081",
-		Handler: httpserver.New().Handler(),
+		Addr:    ":" + cfg.HTTPPort,
+		Handler: httpserver.New(cfg, client).Handler(),
 	}
 
 	go func() {
@@ -30,10 +39,10 @@ func main() {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	<-ctx.Done()
+	<-sigCtx.Done()
 	logger.Println("shutting down AuthSentinel Proxy")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

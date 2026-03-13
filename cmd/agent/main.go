@@ -11,17 +11,43 @@ import (
 
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/config"
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/httpserver"
+	"github.com/ArmanAvanesyan/authsentinel/internal/agent/service"
+	"github.com/ArmanAvanesyan/authsentinel/internal/store/redis"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/cookie"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
 )
 
 func main() {
 	logger := log.New(os.Stdout, "[authsentinel-agent] ", log.LstdFlags|log.LUTC)
-	logger.Println("starting AuthSentinel Agent (skeleton)")
+	logger.Println("starting AuthSentinel Agent")
 
-	_, _ = config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatalf("config load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		logger.Fatalf("config invalid: %v", err)
+	}
+
+	ctx := context.Background()
+	layout := cfg.KeyLayout()
+	store, err := redis.New(ctx, cfg.RedisURL, layout)
+	if err != nil {
+		logger.Fatalf("redis: %v", err)
+	}
+	defer store.Close()
+
+	cookieManager := cookie.NewSignedManager(cfg.CookieSigningSecret)
+	jwks := token.NewHTTPJWKSSource(5 * time.Minute)
+
+	svc, err := service.New(cfg, store.SessionStore(), store.PKCEStore(), store.RefreshLockStore(), cookieManager, jwks)
+	if err != nil {
+		logger.Fatalf("service: %v", err)
+	}
 
 	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: httpserver.New().Handler(),
+		Addr:    ":" + cfg.HTTPPort,
+		Handler: httpserver.New(svc, cfg).Handler(),
 	}
 
 	go func() {
@@ -30,10 +56,10 @@ func main() {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	<-ctx.Done()
+	<-sigCtx.Done()
 	logger.Println("shutting down AuthSentinel Agent")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

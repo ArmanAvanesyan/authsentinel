@@ -1,0 +1,30 @@
+# Minimal GoReleaser config for authsentinel (binaries only; Docker images via separate workflow).
+version: 2
+
+project_name: authsentinel
+
+builds:
+  - id: agent
+    main: ./cmd/agent
+    binary: authsentinel-agent
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+  - id: proxy
+    main: ./cmd/proxy
+    binary: authsentinel-proxy
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"

@@ -1,0 +1,46 @@
+# Minimal docker-compose for AuthSentinel (PeopleSuite integration).
+# Set env vars in .env or export before: OIDC_ISSUER, OIDC_REDIRECT_URI, OIDC_CLIENT_ID,
+# OIDC_CLIENT_SECRET, SESSION_COOKIE_SIGNING_SECRET, APP_BASE_URL.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  authsentinel-agent:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/agent/Dockerfile
+    image: authsentinel-agent:latest
+    environment:
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_NAME: __Host-ess_session
+      COOKIE_SIGNING_SECRET: ${SESSION_COOKIE_SIGNING_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL:-https://portal.example.com}
+      HTTP_PORT: "8080"
+    depends_on: [redis]
+    ports: ["8080:8080"]
+
+  authsentinel-proxy:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/proxy/Dockerfile
+    image: authsentinel-proxy:latest
+    environment:
+      UPSTREAM_URL: http://bff:8002
+      PROXY_PATH_PREFIX: /graphql
+      REQUIRE_AUTH: "true"
+      AGENT_URL: http://authsentinel-agent:8080
+      COOKIE_NAME: __Host-ess_session
+      HTTP_PORT: "8081"
+    depends_on: [authsentinel-agent]
+    ports: ["8081:8081"]
+
+  bff:
+    image: alpine:3.19
+    command: ["sleep", "infinity"]
+    # Replace with your BFF image, e.g. platform-edge-bff:latest
