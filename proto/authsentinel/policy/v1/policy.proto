@@ -6,7 +6,13 @@ option go_package = "github.com/ArmanAvanesyan/authsentinel/proto/gen/go/authsen
 
 message DecisionLogEntry {}
 
+message LogDecisionRequest {
+  DecisionLogEntry entry = 1;
+}
+
+message LogDecisionResponse {}
+
 service PolicyService {
-  rpc LogDecision(DecisionLogEntry) returns (DecisionLogEntry);
+  rpc LogDecision(LogDecisionRequest) returns (LogDecisionResponse);
 }
 
