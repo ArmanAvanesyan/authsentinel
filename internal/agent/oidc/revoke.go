@@ -35,7 +35,7 @@ func (c *Client) Revoke(ctx context.Context, token string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != 204 {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("revoke: status %d: %s", resp.StatusCode, string(data))

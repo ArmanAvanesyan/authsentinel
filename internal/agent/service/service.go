@@ -241,7 +241,7 @@ func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent
 	if err != nil || !ok {
 		return &agent.RefreshResponse{}, nil
 	}
-	defer s.refreshLock.Release(ctx, sessionID)
+	defer func() { _ = s.refreshLock.Release(ctx, sessionID) }()
 	tr, err := s.oidc.Refresh(ctx, sess.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("refresh failed: %w", err)

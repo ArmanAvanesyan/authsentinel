@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-
-	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
 )
 
 func TestGraphQLContextKeyValue(t *testing.T) {
@@ -15,15 +13,14 @@ func TestGraphQLContextKeyValue(t *testing.T) {
 }
 
 func TestPrincipalAliasAssignable(t *testing.T) {
-	var p Principal
-	p = Principal{
+	p := Principal{
 		Subject: "user-123",
 	}
 	if p.Subject != "user-123" {
 		t.Fatalf("expected subject user-123, got %q", p.Subject)
 	}
 
-	var base *token.Principal = &p
+	base := &p
 	if base.Subject != "user-123" {
 		t.Fatalf("alias did not behave as token.Principal")
 	}

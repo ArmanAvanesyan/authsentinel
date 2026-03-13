@@ -35,7 +35,11 @@ func main() {
 	if err != nil {
 		logger.Fatalf("redis: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Printf("redis close: %v", err)
+		}
+	}()
 
 	cookieManager := cookie.NewSignedManager(cfg.CookieSigningSecret)
 	jwks := token.NewHTTPJWKSSource(5 * time.Minute)

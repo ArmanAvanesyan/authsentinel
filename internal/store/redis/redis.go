@@ -136,7 +136,8 @@ func (s *refreshLockStoreImpl) Release(ctx context.Context, sessionID string) er
 func (s *Store) obtainRefreshLock(ctx context.Context, sessionID string, ttlSeconds int) (bool, error) {
 	key := s.layout.RefreshLockKey(sessionID)
 	ttl := time.Duration(ttlSeconds) * time.Second
-	return s.client.SetNX(ctx, key, "1", ttl).Result()
+	result, err := s.client.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: ttl}).Result()
+	return result == "OK", err
 }
 func (s *Store) releaseRefreshLock(ctx context.Context, sessionID string) error {
 	return s.client.Del(ctx, s.layout.RefreshLockKey(sessionID)).Err()
