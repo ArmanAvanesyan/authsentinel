@@ -7,7 +7,6 @@ coverage.out
 
 # Node / pnpm
 node_modules/
-pnpm-lock.yaml
 dist/
 coverage/
 
