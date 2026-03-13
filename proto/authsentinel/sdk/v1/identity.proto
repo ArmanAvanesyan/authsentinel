@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package authsentinel.sdk.v1;
+
+option go_package = "github.com/ArmanAvanesyan/authsentinel/proto/gen/go/authsentinel/sdk/v1;sdkv1";
+
+message Principal {
+  string subject = 1;
+}
+

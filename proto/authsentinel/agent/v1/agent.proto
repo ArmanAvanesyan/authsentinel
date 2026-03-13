@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package authsentinel.agent.v1;
+
+option go_package = "github.com/ArmanAvanesyan/authsentinel/proto/gen/go/authsentinel/agent/v1;agentv1";
+
+message SessionRequest {}
+message SessionResponse {}
+
+service AgentService {
+  rpc Session(SessionRequest) returns (SessionResponse);
+}
+

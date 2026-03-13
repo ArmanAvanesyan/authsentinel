@@ -1,0 +1,14 @@
+version: v1
+
+workspace:
+  directories:
+    - proto
+
+lint:
+  use:
+    - DEFAULT
+
+breaking:
+  use:
+    - FILE
+

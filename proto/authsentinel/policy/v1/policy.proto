@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package authsentinel.policy.v1;
+
+option go_package = "github.com/ArmanAvanesyan/authsentinel/proto/gen/go/authsentinel/policy/v1;policyv1";
+
+message DecisionLogEntry {}
+
+service PolicyService {
+  rpc LogDecision(DecisionLogEntry) returns (DecisionLogEntry);
+}
+

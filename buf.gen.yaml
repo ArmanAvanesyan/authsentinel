@@ -1,0 +1,12 @@
+version: v1
+
+plugins:
+  - name: go
+    out: gen/go
+    opt:
+      - paths=source_relative
+  - name: es
+    out: gen/ts
+    opt:
+      - target=ts
+
