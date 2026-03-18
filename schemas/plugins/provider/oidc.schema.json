@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/plugins/provider/oidc.schema.json",
+  "title": "AuthSentinel OIDC Provider Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "issuer": {
+      "type": "string",
+      "description": "OIDC issuer URL (e.g. https://idp.example.com/realms/demo)"
+    },
+    "client_id": {
+      "type": "string",
+      "description": "OIDC client ID"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "OIDC client secret"
+    },
+    "redirect_uri": {
+      "type": "string",
+      "description": "Redirect URI registered with the IdP"
+    },
+    "scopes": {
+      "description": "OIDC scopes to request",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      ]
+    },
+    "claims_source": {
+      "type": "string",
+      "enum": ["id_token", "access_token"],
+      "default": "id_token"
+    },
+    "audience": {
+      "type": "string",
+      "description": "Optional audience to request/validate"
+    }
+  },
+  "required": ["issuer", "client_id", "redirect_uri"],
+  "additionalProperties": false
+}
+

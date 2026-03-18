@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/plugins/integration/caddy.schema.json",
+  "title": "AuthSentinel Caddy Integration Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "auth_url": {
+      "type": "string",
+      "description": "AuthSentinel proxy base URL for forward-auth (e.g. http://localhost:8081)"
+    },
+    "upstream_url": {
+      "type": "string",
+      "description": "Upstream URL when adapter performs upstream handoff (in-process Engine)"
+    },
+    "require_auth": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, unauthenticated requests are denied (in-process mode)"
+    }
+  },
+  "additionalProperties": false
+}

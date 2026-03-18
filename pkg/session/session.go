@@ -27,6 +27,8 @@ type KeyLayout struct {
 	SessionPrefix         string // e.g. "auth:session:"
 	PKCEPrefix            string // e.g. "auth:pkce:"
 	RefreshLockPrefix     string // e.g. "auth:refresh_lock:"
+	RevokedPrefix         string // e.g. "auth:revoked:" for JTI/session revocation
+	ReplayPrefix          string // e.g. "auth:replay:" for optional replay cache
 	SessionTTLSeconds     int    // e.g. 36000
 	PKCETTLSeconds        int    // e.g. 300
 	RefreshLockTTLSeconds int    // e.g. 15
@@ -38,7 +40,9 @@ func DefaultKeyLayout() KeyLayout {
 		SessionPrefix:         "auth:session:",
 		PKCEPrefix:            "auth:pkce:",
 		RefreshLockPrefix:     "auth:refresh_lock:",
-		SessionTTLSeconds:     36000,
+		RevokedPrefix:         "auth:revoked:",
+		ReplayPrefix:          "auth:replay:",
+		SessionTTLSeconds:    36000,
 		PKCETTLSeconds:        300,
 		RefreshLockTTLSeconds: 15,
 	}
@@ -57,6 +61,22 @@ func (k KeyLayout) PKCEKey(state string) string {
 // RefreshLockKey returns the Redis key for a refresh lock.
 func (k KeyLayout) RefreshLockKey(sessionID string) string {
 	return k.RefreshLockPrefix + sessionID
+}
+
+// RevokedKey returns the Redis key for a revoked JTI or session ID.
+func (k KeyLayout) RevokedKey(id string) string {
+	if k.RevokedPrefix == "" {
+		return "auth:revoked:" + id
+	}
+	return k.RevokedPrefix + id
+}
+
+// ReplayKey returns the Redis key for a replay cache entry (request ID / nonce).
+func (k KeyLayout) ReplayKey(key string) string {
+	if k.ReplayPrefix == "" {
+		return "auth:replay:" + key
+	}
+	return k.ReplayPrefix + key
 }
 
 // ExpiresAtTime returns session expiry as time.Time.

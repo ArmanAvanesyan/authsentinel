@@ -15,13 +15,17 @@ import (
 	"github.com/ArmanAvanesyan/authsentinel/internal/store/redis"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/cookie"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
+	goconfig "github.com/ArmanAvanesyan/go-config/config"
+	"github.com/ArmanAvanesyan/go-config/format/json"
+	"github.com/ArmanAvanesyan/go-config/source/env"
+	"github.com/ArmanAvanesyan/go-config/source/file"
 )
 
 func main() {
 	logger := log.New(os.Stdout, "[authsentinel-agent] ", log.LstdFlags|log.LUTC)
 	logger.Println("starting AuthSentinel Agent")
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		logger.Fatalf("config load: %v", err)
 	}
@@ -51,7 +55,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: httpserver.New(svc, cfg).Handler(),
+		Handler: httpserver.New(svc, cfg, store).Handler(),
 	}
 
 	go func() {
@@ -72,4 +76,25 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("graceful shutdown failed: %v", err)
 	}
+}
+
+func loadConfig() (*config.Config, error) {
+	ctx := context.Background()
+	loader := goconfig.New()
+
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = os.Getenv("AGENT_CONFIG")
+	}
+	if configPath != "" {
+		loader = loader.AddSource(file.New(configPath), json.New())
+	}
+	loader = loader.AddSource(env.New(""))
+
+	var cfg config.Config
+	if err := loader.Load(ctx, &cfg); err != nil {
+		return nil, err
+	}
+	cfg.ApplyDefaults()
+	return &cfg, nil
 }

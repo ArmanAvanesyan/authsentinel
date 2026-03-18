@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/plugins/pipeline/ratelimit.schema.json",
+  "title": "AuthSentinel Pipeline Rate Limit Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Logical name for this rate limiter instance"
+    },
+    "requests_per_minute": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Allowed number of requests per minute"
+    },
+    "burst": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Allowed burst size"
+    },
+    "key_strategy": {
+      "type": "string",
+      "enum": ["ip", "principal", "header"],
+      "default": "ip",
+      "description": "How to derive the rate limit key"
+    },
+    "header_name": {
+      "type": "string",
+      "description": "Header name when key_strategy = header"
+    }
+  },
+  "required": ["name", "requests_per_minute"],
+  "additionalProperties": false
+}
+

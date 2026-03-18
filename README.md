@@ -5,7 +5,7 @@ AuthSentinel is a security runtime that provides an OAuth Agent, OAuth Proxy, em
 
 This repository is a single monorepo that contains:
 
-- **Go code** in standard layout: `cmd/` (agent, proxy binaries), `internal/` (app-specific code), `pkg/` (cookie, token, policy, proxy, agent, graphql, grpc, sdk, config, testing, plugins).
+- **Go code** in standard layout: `cmd/` (agent, proxy binaries), `internal/` (app-specific code), `pkg/` (cookie, token, policy, proxy, agent, graphql, grpc, sdk, testing, plugins). Configuration is loaded via **go-config**; example configs are in `configs/`.
 - JS/TS SDKs under `packages/js/*`
 - Flutter SDK under `packages/flutter/*`
 - Gateway plugins under `pkg/plugins/*` (caddy, traefik, krakend)

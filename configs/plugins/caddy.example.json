@@ -1,0 +1,5 @@
+{
+  "auth_url": "http://localhost:8081",
+  "upstream_url": "http://localhost:3000",
+  "require_auth": true
+}

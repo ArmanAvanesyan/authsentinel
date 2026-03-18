@@ -1,50 +1,33 @@
 package config
 
-import (
-	"os"
-	"strconv"
-	"strings"
-)
+import "strings"
 
-// Config holds configuration for the Proxy app (from environment).
+// Config holds configuration for the Proxy app (loaded via go-config from file + env).
 type Config struct {
-	UpstreamURL     string // UPSTREAM_URL (BFF base URL)
-	ProxyPathPrefix string // PROXY_PATH_PREFIX, e.g. /graphql
-	RequireAuth     bool   // REQUIRE_AUTH
-	AgentURL        string // AGENT_URL (authsentinel-agent base for session/refresh)
-	CookieName      string // COOKIE_NAME (same as agent)
-	HTTPPort        string // HTTP_PORT, default 8081
+	UpstreamURL     string `json:"upstream_url"`
+	ProxyPathPrefix string `json:"proxy_path_prefix"`
+	RequireAuth     bool   `json:"require_auth"`
+	AgentURL        string `json:"agent_url"`
+	CookieName      string `json:"cookie_name"`
+	HTTPPort        string `json:"http_port"`
 
-	// Header claim mapping (claim path or key for upstream headers)
-	HeaderUserIDClaim            string // HEADERS_USER_ID_CLAIM, default "sub"
-	HeaderEmailClaim             string // HEADERS_EMAIL_CLAIM, default "email"
-	HeaderNameClaim              string // HEADERS_NAME_CLAIM, default "name"
-	HeaderPreferredUsernameClaim string // HEADERS_PREFERRED_USERNAME_CLAIM
-	HeaderRolesClaim             string // HEADERS_ROLES_CLAIM, e.g. "realm_access.roles" or "roles"
-	HeaderGroupsClaim            string // HEADERS_GROUPS_CLAIM, default "groups"
-	HeaderTenantIDClaim          string // HEADERS_TENANT_ID_CLAIM or from session tenant_context
-	HeaderAdminRole              string // role name that sets X-Is-Admin=true
-}
+	// PipelinePlugins lists pipeline plugin configs (id, type, raw config). Used by proxy startup to configure and enable pipeline plugins from the registry.
+	PipelinePlugins []PipelinePluginEntry `json:"pipeline_plugins"`
+	// PluginsManifestDir optional directory to discover plugin manifests (JSON). Empty disables filesystem discovery.
+	PluginsManifestDir string `json:"plugins_manifest_dir"`
 
-// Load loads configuration from environment variables.
-func Load() (*Config, error) {
-	c := &Config{
-		UpstreamURL:                  os.Getenv("UPSTREAM_URL"),
-		ProxyPathPrefix:              envOrDefault("PROXY_PATH_PREFIX", "/graphql"),
-		RequireAuth:                  envBool("REQUIRE_AUTH", true),
-		AgentURL:                     os.Getenv("AGENT_URL"),
-		CookieName:                   envOrDefault("COOKIE_NAME", "__Host-ess_session"),
-		HTTPPort:                     envOrDefault("HTTP_PORT", "8081"),
-		HeaderUserIDClaim:            envOrDefault("HEADERS_USER_ID_CLAIM", "sub"),
-		HeaderEmailClaim:             envOrDefault("HEADERS_EMAIL_CLAIM", "email"),
-		HeaderNameClaim:              envOrDefault("HEADERS_NAME_CLAIM", "name"),
-		HeaderPreferredUsernameClaim: envOrDefault("HEADERS_PREFERRED_USERNAME_CLAIM", "preferred_username"),
-		HeaderRolesClaim:             envOrDefault("HEADERS_ROLES_CLAIM", "realm_access.roles"),
-		HeaderGroupsClaim:            envOrDefault("HEADERS_GROUPS_CLAIM", "groups"),
-		HeaderTenantIDClaim:          os.Getenv("HEADERS_TENANT_ID_CLAIM"),
-		HeaderAdminRole:              envOrDefault("HEADERS_ADMIN_ROLE", "admin"),
-	}
-	return c, nil
+	// AdminSecret if set guards /admin; requests must include header X-Admin-Secret: <value>. Empty disables admin endpoint.
+	AdminSecret string `json:"admin_secret"`
+
+	// Header claim mapping
+	HeaderUserIDClaim            string `json:"headers_user_id_claim"`
+	HeaderEmailClaim             string `json:"headers_email_claim"`
+	HeaderNameClaim              string `json:"headers_name_claim"`
+	HeaderPreferredUsernameClaim string `json:"headers_preferred_username_claim"`
+	HeaderRolesClaim             string `json:"headers_roles_claim"`
+	HeaderGroupsClaim            string `json:"headers_groups_claim"`
+	HeaderTenantIDClaim          string `json:"headers_tenant_id_claim"`
+	HeaderAdminRole              string `json:"headers_admin_role"`
 }
 
 // Validate returns an error if required configuration is missing.
@@ -61,23 +44,45 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// ApplyDefaults sets default values for optional fields when not set.
+func (c *Config) ApplyDefaults() {
+	if c.ProxyPathPrefix == "" {
+		c.ProxyPathPrefix = "/graphql"
 	}
-	return def
+	if c.CookieName == "" {
+		c.CookieName = "__Host-ess_session"
+	}
+	if c.HTTPPort == "" {
+		c.HTTPPort = "8081"
+	}
+	if c.HeaderUserIDClaim == "" {
+		c.HeaderUserIDClaim = "sub"
+	}
+	if c.HeaderEmailClaim == "" {
+		c.HeaderEmailClaim = "email"
+	}
+	if c.HeaderNameClaim == "" {
+		c.HeaderNameClaim = "name"
+	}
+	if c.HeaderPreferredUsernameClaim == "" {
+		c.HeaderPreferredUsernameClaim = "preferred_username"
+	}
+	if c.HeaderRolesClaim == "" {
+		c.HeaderRolesClaim = "realm_access.roles"
+	}
+	if c.HeaderGroupsClaim == "" {
+		c.HeaderGroupsClaim = "groups"
+	}
+	if c.HeaderAdminRole == "" {
+		c.HeaderAdminRole = "admin"
+	}
 }
 
-func envBool(key string, def bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return def
-	}
-	return b
+// PipelinePluginEntry is a single pipeline plugin config entry (id, type, raw map for go-config / pluginconfig).
+type PipelinePluginEntry struct {
+	ID   string         `json:"id"`
+	Type string         `json:"type"`
+	Raw  map[string]any `json:"raw"`
 }
 
 type configError string

@@ -2,6 +2,8 @@ package token
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -98,15 +100,24 @@ func ValidateIDToken(ctx context.Context, raw string, jwksSource JWKSSource, iss
 	}, nil
 }
 
+// jwkKey holds optional RSA or EC fields from a JWK.
+type jwkKey struct {
+	Kid string `json:"kid"`
+	Kty string `json:"kty"`
+	// RSA
+	N string `json:"n"`
+	E string `json:"e"`
+	// EC
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
+}
+
 // keyFuncFromJWKS returns a jwt.Keyfunc that selects the key by kid from the JWKS JSON.
+// Supports RSA (RS256, etc.) and EC (ES256, ES384, ES512) keys.
 func keyFuncFromJWKS(jwksData []byte) jwt.Keyfunc {
 	var set struct {
-		Keys []struct {
-			Kid string `json:"kid"`
-			Kty string `json:"kty"`
-			N   string `json:"n"`
-			E   string `json:"e"`
-		} `json:"keys"`
+		Keys []jwkKey `json:"keys"`
 	}
 	if err := json.Unmarshal(jwksData, &set); err != nil {
 		return func(t *jwt.Token) (interface{}, error) {
@@ -119,7 +130,14 @@ func keyFuncFromJWKS(jwksData []byte) jwt.Keyfunc {
 			return nil, fmt.Errorf("token: missing kid in header")
 		}
 		for _, k := range set.Keys {
-			if k.Kid == kid && k.Kty == "RSA" {
+			if k.Kid != kid {
+				continue
+			}
+			switch k.Kty {
+			case "RSA":
+				if k.N == "" || k.E == "" {
+					continue
+				}
 				nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
 				if err != nil {
 					return nil, err
@@ -134,8 +152,42 @@ func keyFuncFromJWKS(jwksData []byte) jwt.Keyfunc {
 					return nil, fmt.Errorf("token: exponent too large")
 				}
 				return &rsa.PublicKey{N: n, E: int(eBig.Int64())}, nil
+			case "EC":
+				if k.Crv == "" || k.X == "" || k.Y == "" {
+					continue
+				}
+				pub, err := ecPubKeyFromJWK(k.Crv, k.X, k.Y)
+				if err != nil {
+					return nil, err
+				}
+				return pub, nil
 			}
 		}
 		return nil, fmt.Errorf("token: no key found for kid %s", kid)
 	}
+}
+
+func ecPubKeyFromJWK(crv, xB64, yB64 string) (*ecdsa.PublicKey, error) {
+	var curve elliptic.Curve
+	switch crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("token: unsupported EC curve %s", crv)
+	}
+	xBytes, err := base64.RawURLEncoding.DecodeString(xB64)
+	if err != nil {
+		return nil, err
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(yB64)
+	if err != nil {
+		return nil, err
+	}
+	x := new(big.Int).SetBytes(xBytes)
+	y := new(big.Int).SetBytes(yBytes)
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }

@@ -1,0 +1,22 @@
+# AuthSentinel Caddy adapter – example Caddyfile
+# Option A: Use Caddy's built-in forward_auth to point at authsentinel-proxy.
+# Run authsentinel-proxy (e.g. on :8081) and authsentinel-agent (e.g. on :8080) separately.
+
+{
+	admin off
+}
+
+:8090 {
+	# Forward auth: every request is sent to the proxy; 2xx + headers = allow, else deny
+	forward_auth http://localhost:8081 {
+		uri /
+		copy_headers X-User-Id X-Roles X-User-Email X-Tenant-Id Authorization
+	}
+	reverse_proxy http://localhost:3000
+}
+
+# Option B: If you build Caddy with the authsentinel directive (go build -tags caddy):
+# :8090 {
+# 	authsentinel http://localhost:8081
+# 	reverse_proxy http://localhost:3000
+# }

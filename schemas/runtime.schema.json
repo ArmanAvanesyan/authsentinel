@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/runtime.schema.json",
+  "title": "AuthSentinel Runtime (base)",
+  "description": "Shared runtime concepts used by agent and proxy configs: key layout prefixes, cookie/session naming, and common conventions. Per-binary configs reference this for documentation only; validation is per-binary.",
+  "type": "object",
+  "properties": {
+    "session_redis_prefix": {
+      "type": "string",
+      "description": "Redis key prefix for session, PKCE, refresh lock, and related keys (e.g. auth)"
+    },
+    "cookie_name": {
+      "type": "string",
+      "description": "Name of the session cookie (must match between agent and proxy)"
+    },
+    "http_port": {
+      "type": "string",
+      "description": "HTTP listen port"
+    }
+  }
+}

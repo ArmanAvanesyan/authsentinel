@@ -1,99 +1,94 @@
 package config
 
 import (
+	"encoding/json"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 )
 
-// Config holds configuration for the Agent app (from environment).
-type Config struct {
-	// OIDC
-	OIDCIssuer       string   // OIDC_ISSUER
-	OIDCRedirectURI  string   // OIDC_REDIRECT_URI
-	OIDCClientID     string   // OIDC_CLIENT_ID
-	OIDCClientSecret string   // OIDC_CLIENT_SECRET
-	OIDCScopes       []string // OIDC_SCOPES (comma-separated)
-	OIDCAudience     string   // OIDC_AUDIENCE (optional)
-	OIDCClaimsSource string   // OIDC_CLAIMS_SOURCE: "id_token" or "access_token", default id_token
+// CommaStrings is a []string that unmarshals from a JSON string (comma-separated) or a JSON array.
+// Used for env vars like OIDC_SCOPES=openid,profile and YAML arrays.
+type CommaStrings []string
 
-	// Redis
-	RedisURL string // REDIS_URL
-
-	// Session key layout and TTLs
-	SessionRedisPrefix           string // SESSION_REDIS_PREFIX, default "auth"
-	SessionTTLSeconds            int    // SESSION_TTL_SECONDS, default 36000
-	SessionPKCETTLSeconds        int    // SESSION_PKCE_TTL_SECONDS, default 300
-	SessionRefreshLockTTLSeconds int    // SESSION_REFRESH_LOCK_TTL_SECONDS, default 15
-	SessionRefreshEarlySeconds   int    // SESSION_REFRESH_EARLY_SECONDS, default 60
-
-	// Cookie
-	CookieName          string        // COOKIE_NAME, e.g. __Host-ess_session
-	CookieSigningSecret string        // COOKIE_SIGNING_SECRET
-	CookieSecure        bool          // COOKIE_SECURE, default true
-	CookieSameSite      http.SameSite // COOKIE_SAME_SITE: lax, strict, none
-	CookieDomain        string        // COOKIE_DOMAIN (optional)
-
-	// App and redirects
-	AppBaseURL             string   // APP_BASE_URL, e.g. https://portal.example.com
-	LoginErrorRedirectPath string   // LOGIN_ERROR_REDIRECT_PATH, e.g. /login?error=oidc_error
-	AllowedRedirectOrigins []string // ALLOWED_REDIRECT_ORIGINS (comma-separated)
-	AllowedRedirectPaths   []string // ALLOWED_REDIRECT_PATHS (comma-separated path prefixes)
-
-	// HTTP
-	HTTPPort string // HTTP_PORT, default 8080
-
-	// Optional: webhook and enrichment
-	PostLoginWebhookURL  string // POST_LOGIN_WEBHOOK_URL
-	SessionEnrichmentAPI string // SESSION_ENRICHMENT_API (e.g. PATCH session for tenant)
-
-	// CORS
-	CORSAllowedOrigins []string // CORS_ALLOWED_ORIGINS (comma-separated)
+// UnmarshalJSON implements json.Unmarshaler.
+func (c *CommaStrings) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		*c = nil
+		return nil
+	}
+	if data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*c = splitTrim(s, ",")
+		return nil
+	}
+	var slice []string
+	if err := json.Unmarshal(data, &slice); err != nil {
+		return err
+	}
+	*c = slice
+	return nil
 }
 
-// Load loads configuration from environment variables.
-func Load() (*Config, error) {
-	c := &Config{
-		OIDCIssuer:                   os.Getenv("OIDC_ISSUER"),
-		OIDCRedirectURI:              os.Getenv("OIDC_REDIRECT_URI"),
-		OIDCClientID:                 os.Getenv("OIDC_CLIENT_ID"),
-		OIDCClientSecret:             os.Getenv("OIDC_CLIENT_SECRET"),
-		OIDCScopes:                   splitTrim(os.Getenv("OIDC_SCOPES"), ","),
-		OIDCAudience:                 os.Getenv("OIDC_AUDIENCE"),
-		OIDCClaimsSource:             envOrDefault("OIDC_CLAIMS_SOURCE", "id_token"),
-		RedisURL:                     os.Getenv("REDIS_URL"),
-		SessionRedisPrefix:           envOrDefault("SESSION_REDIS_PREFIX", "auth"),
-		SessionTTLSeconds:            envInt("SESSION_TTL_SECONDS", 36000),
-		SessionPKCETTLSeconds:        envInt("SESSION_PKCE_TTL_SECONDS", 300),
-		SessionRefreshLockTTLSeconds: envInt("SESSION_REFRESH_LOCK_TTL_SECONDS", 15),
-		SessionRefreshEarlySeconds:   envInt("SESSION_REFRESH_EARLY_SECONDS", 60),
-		CookieName:                   envOrDefault("COOKIE_NAME", "__Host-ess_session"),
-		CookieSigningSecret:          os.Getenv("COOKIE_SIGNING_SECRET"),
-		CookieSecure:                 envBool("COOKIE_SECURE", true),
-		CookieSameSite:               parseSameSite(os.Getenv("COOKIE_SAME_SITE")),
-		CookieDomain:                 os.Getenv("COOKIE_DOMAIN"),
-		AppBaseURL:                   os.Getenv("APP_BASE_URL"),
-		LoginErrorRedirectPath:       envOrDefault("LOGIN_ERROR_REDIRECT_PATH", "/login?error=oidc_error"),
-		AllowedRedirectOrigins:       splitTrim(os.Getenv("ALLOWED_REDIRECT_ORIGINS"), ","),
-		AllowedRedirectPaths:         splitTrim(os.Getenv("ALLOWED_REDIRECT_PATHS"), ","),
-		HTTPPort:                     envOrDefault("HTTP_PORT", "8080"),
-		PostLoginWebhookURL:          os.Getenv("POST_LOGIN_WEBHOOK_URL"),
-		SessionEnrichmentAPI:         os.Getenv("SESSION_ENRICHMENT_API"),
-		CORSAllowedOrigins:           splitTrim(os.Getenv("CORS_ALLOWED_ORIGINS"), ","),
-	}
-	if len(c.OIDCScopes) == 0 {
-		c.OIDCScopes = []string{"openid", "profile"}
-	}
-	if len(c.AllowedRedirectPaths) == 0 {
-		c.AllowedRedirectPaths = []string{"/"}
-	}
-	return c, nil
+// Config holds configuration for the Agent app (loaded via go-config from file + env).
+type Config struct {
+	// OIDC
+	OIDCIssuer       string      `json:"oidc_issuer"`
+	OIDCRedirectURI  string      `json:"oidc_redirect_uri"`
+	OIDCClientID     string      `json:"oidc_client_id"`
+	OIDCClientSecret string      `json:"oidc_client_secret"`
+	OIDCScopes       CommaStrings `json:"oidc_scopes"`
+	OIDCAudience     string      `json:"oidc_audience"`
+	OIDCClaimsSource string      `json:"oidc_claims_source"`
+
+	// Redis
+	RedisURL string `json:"redis_url"`
+
+	// Session key layout and TTLs
+	SessionRedisPrefix           string `json:"session_redis_prefix"`
+	SessionTTLSeconds            int    `json:"session_ttl_seconds"`
+	SessionPKCETTLSeconds        int    `json:"session_pkce_ttl_seconds"`
+	SessionRefreshLockTTLSeconds int    `json:"session_refresh_lock_ttl_seconds"`
+	SessionRefreshEarlySeconds   int    `json:"session_refresh_early_seconds"`
+
+	// Cookie
+	CookieName          string `json:"cookie_name"`
+	CookieSigningSecret string `json:"cookie_signing_secret"`
+	CookieSecure        bool   `json:"cookie_secure"`
+	CookieSameSiteStr   string `json:"cookie_same_site"`
+	CookieDomain        string `json:"cookie_domain"`
+	// CookieSameSite is set in Validate() from CookieSameSiteStr.
+	CookieSameSite http.SameSite `json:"-"`
+
+	// App and redirects
+	AppBaseURL             string       `json:"app_base_url"`
+	LoginErrorRedirectPath string       `json:"login_error_redirect_path"`
+	AllowedRedirectOrigins CommaStrings `json:"allowed_redirect_origins"`
+	AllowedRedirectPaths   CommaStrings `json:"allowed_redirect_paths"`
+
+	// HTTP
+	HTTPPort string `json:"http_port"`
+
+	// AdminSecret if set guards /admin; requests must include header X-Admin-Secret: <value>. Empty disables admin endpoint.
+	AdminSecret string `json:"admin_secret"`
+
+	// Optional: webhook and enrichment
+	PostLoginWebhookURL  string `json:"post_login_webhook_url"`
+	SessionEnrichmentAPI string `json:"session_enrichment_api"`
+
+	// CORS
+	CORSAllowedOrigins CommaStrings `json:"cors_allowed_origins"`
+
+	// ProviderPluginID selects the identity provider plugin by ID or capability (e.g. "oidc", "provider:oidc"). Empty means use built-in OIDC from top-level config.
+	ProviderPluginID string `json:"provider_plugin_id"`
 }
 
 // Validate returns an error if required configuration is missing.
+// It also applies defaults and parses CookieSameSiteStr into CookieSameSite.
 func (c *Config) Validate() error {
 	if c.OIDCIssuer == "" {
 		return errMissing("OIDC_ISSUER")
@@ -116,6 +111,13 @@ func (c *Config) Validate() error {
 	if c.OIDCClaimsSource != "id_token" && c.OIDCClaimsSource != "access_token" {
 		c.OIDCClaimsSource = "id_token"
 	}
+	c.CookieSameSite = parseSameSite(c.CookieSameSiteStr)
+	if len(c.OIDCScopes) == 0 {
+		c.OIDCScopes = CommaStrings{"openid", "profile"}
+	}
+	if len(c.AllowedRedirectPaths) == 0 {
+		c.AllowedRedirectPaths = CommaStrings{"/"}
+	}
 	return nil
 }
 
@@ -129,6 +131,8 @@ func (c *Config) KeyLayout() session.KeyLayout {
 		SessionPrefix:         p + ":session:",
 		PKCEPrefix:            p + ":pkce:",
 		RefreshLockPrefix:     p + ":refresh_lock:",
+		RevokedPrefix:         p + ":revoked:",
+		ReplayPrefix:          p + ":replay:",
 		SessionTTLSeconds:     c.SessionTTLSeconds,
 		PKCETTLSeconds:        c.SessionPKCETTLSeconds,
 		RefreshLockTTLSeconds: c.SessionRefreshLockTTLSeconds,
@@ -149,37 +153,6 @@ func splitTrim(s, sep string) []string {
 	return out
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}
-
-func envBool(key string, def bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return def
-	}
-	return b
-}
-
 func parseSameSite(s string) http.SameSite {
 	switch strings.ToLower(s) {
 	case "strict":
@@ -196,3 +169,47 @@ type configError string
 func (e configError) Error() string { return "config: missing " + string(e) }
 
 func errMissing(name string) error { return configError(name) }
+
+// ApplyDefaults sets default values for optional fields when not set.
+// Call after Load from go-config if you need the same defaults as before (e.g. HTTP port).
+func (c *Config) ApplyDefaults() {
+	if c.OIDCClaimsSource == "" {
+		c.OIDCClaimsSource = "id_token"
+	}
+	if c.SessionRedisPrefix == "" {
+		c.SessionRedisPrefix = "auth"
+	}
+	if c.SessionTTLSeconds == 0 {
+		c.SessionTTLSeconds = 36000
+	}
+	if c.SessionPKCETTLSeconds == 0 {
+		c.SessionPKCETTLSeconds = 300
+	}
+	if c.SessionRefreshLockTTLSeconds == 0 {
+		c.SessionRefreshLockTTLSeconds = 15
+	}
+	if c.SessionRefreshEarlySeconds == 0 {
+		c.SessionRefreshEarlySeconds = 60
+	}
+	if c.CookieName == "" {
+		c.CookieName = "__Host-ess_session"
+	}
+	if c.LoginErrorRedirectPath == "" {
+		c.LoginErrorRedirectPath = "/login?error=oidc_error"
+	}
+	if c.HTTPPort == "" {
+		c.HTTPPort = "8080"
+	}
+}
+
+// OIDCScopesSlice returns OIDCScopes as []string for APIs that require it.
+func (c *Config) OIDCScopesSlice() []string { return []string(c.OIDCScopes) }
+
+// AllowedRedirectOriginsSlice returns AllowedRedirectOrigins as []string.
+func (c *Config) AllowedRedirectOriginsSlice() []string { return []string(c.AllowedRedirectOrigins) }
+
+// AllowedRedirectPathsSlice returns AllowedRedirectPaths as []string.
+func (c *Config) AllowedRedirectPathsSlice() []string { return []string(c.AllowedRedirectPaths) }
+
+// CORSAllowedOriginsSlice returns CORSAllowedOrigins as []string.
+func (c *Config) CORSAllowedOriginsSlice() []string { return []string(c.CORSAllowedOrigins) }

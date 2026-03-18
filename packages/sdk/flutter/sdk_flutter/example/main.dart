@@ -10,19 +10,53 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final client = SessionClient();
+    final client = AuthClient(agentBaseUrl: 'https://auth.example.com');
     return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(title: const Text('AuthSentinel Flutter SDK Example')),
-        body: Center(
-          child: FutureBuilder<String>(
-            future: client.getStatus(),
-            builder: (context, snapshot) {
-              return Text('Session status: ${snapshot.data ?? 'loading'}');
-            },
-          ),
+      home: AuthScope(
+        client: client,
+        child: Scaffold(
+          appBar: AppBar(title: const Text('AuthSentinel Flutter SDK Example')),
+          body: const Center(child: SessionStatusView()),
         ),
       ),
+    );
+  }
+}
+
+class SessionStatusView extends StatelessWidget {
+  const SessionStatusView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final loading = context.authLoading;
+    final session = context.authSession;
+    if (loading) {
+      return const CircularProgressIndicator();
+    }
+    final status = session?.status.name ?? 'unknown';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Session status: $status'),
+        const SizedBox(height: 16),
+        if (session?.isAuthenticated == true && session?.user != null)
+          Text('User: ${session!.user!.sub}'),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton(
+              onPressed: () => context.authClient.login(),
+              child: const Text('Login'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () => context.authClient.logout(),
+              child: const Text('Logout'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/plugins/integration/traefik.schema.json",
+  "title": "AuthSentinel Traefik Integration Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "auth_url": {
+      "type": "string",
+      "description": "AuthSentinel proxy URL for ForwardAuth mode"
+    },
+    "upstream_url": {
+      "type": "string",
+      "description": "Upstream URL when adapter performs upstream handoff"
+    },
+    "auth_response_headers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Header names to copy from auth response to forwarded request (empty = X-* and Authorization)"
+    }
+  },
+  "additionalProperties": false
+}

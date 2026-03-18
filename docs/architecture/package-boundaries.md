@@ -12,4 +12,4 @@ Core Go packages live under `pkg/`:
 - `pkg/testing`: test fixtures and helpers.
 - `pkg/plugins/{caddy,traefik,krakend}`: gateway plugins.
 
-Executables are in `cmd/agent` and `cmd/proxy`. App-only code is in `internal/agent` and `internal/proxy`. Shared config is in `pkg/config`.
+Executables are in `cmd/agent` and `cmd/proxy`. App-only code is in `internal/agent` and `internal/proxy`. Configuration is loaded via the external **go-config** library; see `implementation-plan.md` for the full architecture and config strategy.

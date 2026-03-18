@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://authsentinel.dev/schemas/plugins/integration/krakend.schema.json",
+  "title": "AuthSentinel KrakenD Integration Plugin Configuration",
+  "type": "object",
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "description": "KrakenD endpoint pattern this plugin protects"
+    },
+    "upstream_url": {
+      "type": "string",
+      "description": "Upstream URL to forward allowed requests to"
+    },
+    "require_auth": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether authentication is required for this endpoint"
+    }
+  },
+  "required": ["endpoint", "upstream_url"],
+  "additionalProperties": false
+}
+

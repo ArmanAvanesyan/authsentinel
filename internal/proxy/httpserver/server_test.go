@@ -15,7 +15,7 @@ func TestNewReturnsServerWithHandler(t *testing.T) {
 		CookieName:      "test",
 	}
 	client := proxy.NewAgentClient(cfg.AgentURL, cfg.CookieName)
-	s := New(cfg, client)
+	s := New(cfg, client, nil, nil, nil)
 	if s == nil {
 		t.Fatalf("expected non-nil Server")
 	}

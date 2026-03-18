@@ -37,27 +37,25 @@ func TestNormalizeRequestPopulatesFields(t *testing.T) {
 	}
 }
 
-func TestMiddlewareCallsNextHandler(t *testing.T) {
+func TestMiddlewareAllowWritesResponseWhenNoUpstream(t *testing.T) {
 	engine := testEngine{}
-	mw := Middleware(engine)
+	mw := Middleware(engine, "")
 
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		w.WriteHeader(http.StatusNoContent)
 	})
-
 	handler := mw(next)
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/foo", nil)
 	rr := httptest.NewRecorder()
-
 	handler.ServeHTTP(rr, req)
 
-	if !called {
-		t.Fatalf("expected next handler to be called")
+	// When Allow and upstream URL is empty, we write response (200), do not call next
+	if called {
+		t.Fatalf("middleware should not call next when handling the request")
 	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 	}
 }

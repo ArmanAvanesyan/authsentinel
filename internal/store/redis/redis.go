@@ -35,6 +35,11 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
+// Ping checks connectivity to Redis. Used for readiness and admin health.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.client.Ping(ctx).Err()
+}
+
 // SessionStore returns a session.SessionStore implemented by this Store.
 func (s *Store) SessionStore() session.SessionStore { return (*sessionStoreImpl)(s) }
 
@@ -141,4 +146,45 @@ func (s *Store) obtainRefreshLock(ctx context.Context, sessionID string, ttlSeco
 }
 func (s *Store) releaseRefreshLock(ctx context.Context, sessionID string) error {
 	return s.client.Del(ctx, s.layout.RefreshLockKey(sessionID)).Err()
+}
+
+// SetRevoked marks the given id (JTI or session ID) as revoked for the given TTL.
+// Used for logout-all and token revocation.
+func (s *Store) SetRevoked(ctx context.Context, id string, ttl time.Duration) error {
+	key := s.layout.RevokedKey(id)
+	return s.client.Set(ctx, key, "1", ttl).Err()
+}
+
+// IsRevoked returns true if the id has been revoked (and the entry has not yet expired).
+func (s *Store) IsRevoked(ctx context.Context, id string) (bool, error) {
+	key := s.layout.RevokedKey(id)
+	_, err := s.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RecordReplay records a key (e.g. request ID or nonce) in the replay cache with the given TTL.
+// Returns nil on success.
+func (s *Store) RecordReplay(ctx context.Context, key string, ttl time.Duration) error {
+	k := s.layout.ReplayKey(key)
+	return s.client.Set(ctx, k, "1", ttl).Err()
+}
+
+// CheckReplay returns true if the key was already seen (replay), and false if not yet seen.
+// Does not record the key; use RecordReplay after validating to record.
+func (s *Store) CheckReplay(ctx context.Context, key string) (alreadySeen bool, err error) {
+	k := s.layout.ReplayKey(key)
+	_, err = s.client.Get(ctx, k).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

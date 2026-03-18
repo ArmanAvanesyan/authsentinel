@@ -1,16 +1,23 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/config"
+	"github.com/ArmanAvanesyan/authsentinel/internal/agent/errormap"
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/service"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/agent"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 )
+
+// Pinger is used for readiness checks (e.g. Redis).
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
 
 // Server is the HTTP server for the Agent app.
 type Server struct {
@@ -18,21 +25,29 @@ type Server struct {
 	svc    agent.Service
 	cfg    *config.Config
 	cookie string
+	ping   Pinger // optional; used for /readyz
 }
 
-// New constructs a new Server with the given service and config.
-func New(svc agent.Service, cfg *config.Config) *Server {
+// New constructs a new Server with the given service and config. If pinger is non-nil, /readyz will use it.
+func New(svc agent.Service, cfg *config.Config, pinger Pinger) *Server {
 	s := &Server{
 		mux:    http.NewServeMux(),
 		svc:    svc,
 		cfg:    cfg,
 		cookie: cfg.CookieName,
+		ping:   pinger,
 	}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	s.mux.HandleFunc("GET /livez", s.handleLivez)
+	if s.cfg.AdminSecret != "" {
+		s.mux.HandleFunc("GET /admin", s.handleAdmin)
+	}
 	s.mux.HandleFunc("GET /login", s.handleLogin)
 	s.mux.HandleFunc("GET /callback", s.handleCallback)
 	s.mux.HandleFunc("POST /callback", s.handleCallback)
@@ -46,10 +61,72 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /internal/resolve", s.handleResolve)
 }
 
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleLivez(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if s.ping != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.ping.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("unhealthy: " + err.Error()))
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Admin-Secret") != s.cfg.AdminSecret {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	out := map[string]any{
+		"config_summary": s.agentConfigSummary(),
+		"session_store":  s.sessionStoreStatus(r.Context()),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) agentConfigSummary() map[string]any {
+	return map[string]any{
+		"oidc_issuer":       s.cfg.OIDCIssuer,
+		"oidc_redirect_uri": s.cfg.OIDCRedirectURI,
+		"cookie_name":       s.cfg.CookieName,
+		"http_port":         s.cfg.HTTPPort,
+		"redis_url_set":     s.cfg.RedisURL != "",
+		"app_base_url":      s.cfg.AppBaseURL,
+	}
+}
+
+func (s *Server) sessionStoreStatus(ctx context.Context) map[string]any {
+	if s.ping == nil {
+		return map[string]any{"status": "unknown", "message": "no pinger"}
+	}
+	if err := s.ping.Ping(ctx); err != nil {
+		return map[string]any{"status": "error", "error": err.Error()}
+	}
+	return map[string]any{"status": "ok"}
+}
+
 // Handler returns the HTTP handler (with optional CORS).
 func (s *Server) Handler() http.Handler {
-	if len(s.cfg.CORSAllowedOrigins) > 0 {
-		return cors(s.cfg.CORSAllowedOrigins)(s.mux)
+	if len(s.cfg.CORSAllowedOriginsSlice()) > 0 {
+		return cors(s.cfg.CORSAllowedOriginsSlice())(s.mux)
 	}
 	return s.mux
 }
@@ -88,7 +165,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	redirectTo := r.URL.Query().Get("redirect_to")
 	resp, err := s.svc.LoginStart(r.Context(), agent.LoginStartRequest{RedirectTo: redirectTo})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	http.Redirect(w, r, resp.RedirectURL, http.StatusFound)
@@ -110,7 +187,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.svc.LoginEnd(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	if resp.ClearCookie {
@@ -158,7 +235,7 @@ func writeSessionCookie(w http.ResponseWriter, name, value, path, domain string,
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.svc.Session(r.Context(), agent.SessionRequest{SessionCookie: s.getCookie(r)})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	if resp.SetCookie != "" {
@@ -175,7 +252,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.svc.Session(r.Context(), agent.SessionRequest{SessionCookie: s.getCookie(r)})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	if !resp.IsAuthenticated || resp.User == nil {
@@ -202,7 +279,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Referer:       referer,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	if resp.ClearCookie {
@@ -277,11 +354,7 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := enricher.AttachTenantContext(r.Context(), body.SessionID, body.TenantContext); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), errormap.StatusFor(err))
 		return
 	}
 	w.WriteHeader(http.StatusOK)

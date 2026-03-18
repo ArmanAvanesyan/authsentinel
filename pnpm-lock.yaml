@@ -28,6 +28,10 @@ importers:
         version: 4.1.0(jsdom@28.1.0)(vite@8.0.0)
 
   packages/sdk/js/node:
+    dependencies:
+      '@authsentinel/sdk-core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.0
@@ -37,6 +41,10 @@ importers:
         version: 4.1.0(jsdom@28.1.0)(vite@8.0.0)
 
   packages/sdk/js/react:
+    dependencies:
+      '@authsentinel/sdk-core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@testing-library/react':
         specifier: ^16.3.2
@@ -61,6 +69,10 @@ importers:
         version: 4.1.0(jsdom@28.1.0)(vite@8.0.0)
 
   packages/sdk/js/typescript:
+    dependencies:
+      '@authsentinel/sdk-core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.0

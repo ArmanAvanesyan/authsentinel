@@ -1,0 +1,28 @@
+# AuthSentinel Traefik adapter – example dynamic config
+# Run authsentinel-proxy (e.g. on :8081); Traefik ForwardAuth calls it.
+
+http:
+  middlewares:
+    authsentinel-forward:
+      forwardAuth:
+        address: "http://localhost:8081"
+        authResponseHeaders:
+          - "X-User-Id"
+          - "X-Roles"
+          - "X-User-Email"
+          - "X-Tenant-Id"
+          - "Authorization"
+        trustForwardHeader: true
+
+  routers:
+    app@file:
+      rule: "PathPrefix(`/`)"
+      middlewares:
+        - authsentinel-forward
+      service: app@file
+
+  services:
+    app@file:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:3000"

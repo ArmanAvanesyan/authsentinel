@@ -1,0 +1,18 @@
+# AuthSentinel Proxy example config (YAML).
+# Use with CONFIG_PATH or PROXY_CONFIG when using a YAML-capable loader.
+# For JSON loader use configs/proxy.example.json instead.
+
+upstream_url: "http://localhost:3000"
+proxy_path_prefix: "/graphql"
+require_auth: true
+agent_url: "http://localhost:8080"
+cookie_name: "__Host-ess_session"
+http_port: "8081"
+headers_user_id_claim: "sub"
+headers_email_claim: "email"
+headers_name_claim: "name"
+headers_preferred_username_claim: "preferred_username"
+headers_roles_claim: "realm_access.roles"
+headers_groups_claim: "groups"
+headers_tenant_id_claim: ""
+headers_admin_role: "admin"

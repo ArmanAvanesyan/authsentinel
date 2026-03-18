@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuthSentinel Proxy config",
+  "type": "object",
+  "properties": {
+    "agent_url": {
+      "type": "string"
+    },
+    "cookie_name": {
+      "type": "string"
+    },
+    "headers_admin_role": {
+      "type": "string"
+    },
+    "headers_email_claim": {
+      "type": "string"
+    },
+    "headers_groups_claim": {
+      "type": "string"
+    },
+    "headers_name_claim": {
+      "type": "string"
+    },
+    "headers_preferred_username_claim": {
+      "type": "string"
+    },
+    "headers_roles_claim": {
+      "type": "string"
+    },
+    "headers_tenant_id_claim": {
+      "type": "string"
+    },
+    "headers_user_id_claim": {
+      "type": "string"
+    },
+    "http_port": {
+      "type": "string"
+    },
+    "pipeline_plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "raw"
+        ]
+      }
+    },
+    "plugins_manifest_dir": {
+      "type": "string"
+    },
+    "proxy_path_prefix": {
+      "type": "string"
+    },
+    "require_auth": {
+      "type": "boolean"
+    },
+    "upstream_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "upstream_url",
+    "proxy_path_prefix",
+    "require_auth",
+    "agent_url",
+    "cookie_name",
+    "http_port",
+    "pipeline_plugins",
+    "plugins_manifest_dir",
+    "headers_user_id_claim",
+    "headers_email_claim",
+    "headers_name_claim",
+    "headers_preferred_username_claim",
+    "headers_roles_claim",
+    "headers_groups_claim",
+    "headers_tenant_id_claim",
+    "headers_admin_role"
+  ]
+}

@@ -28,7 +28,7 @@ func (m *mockAgentService) Logout(_ context.Context, _ agent.LogoutRequest) (*ag
 
 func TestNewReturnsServerWithHandler(t *testing.T) {
 	cfg := &config.Config{HTTPPort: "8080", CookieName: "test", SessionTTLSeconds: 3600}
-	s := New(&mockAgentService{}, cfg)
+	s := New(&mockAgentService{}, cfg, nil)
 	if s == nil {
 		t.Fatalf("expected non-nil Server")
 	}

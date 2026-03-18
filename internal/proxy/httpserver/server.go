@@ -1,105 +1,178 @@
 package httpserver
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy"
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy/config"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/policy"
+	pkgproxy "github.com/ArmanAvanesyan/authsentinel/pkg/proxy"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginregistry"
 )
 
 // Server is the HTTP server for the Proxy app.
 type Server struct {
-	mux    *http.ServeMux
-	cfg    *config.Config
-	client *proxy.AgentClient
+	mux             *http.ServeMux
+	cfg             *config.Config
+	engine          pkgproxy.Engine
+	registry        *pluginregistry.Registry
+	metricsHandler  http.Handler
 }
 
 // New constructs a new Server with the given config and agent client.
-func New(cfg *config.Config, client *proxy.AgentClient) *Server {
+// The server uses pkg/proxy.Engine with policy evaluation; when no policy bundle is loaded, fallback is allow.
+// registry is optional; when set it holds discovered/registered plugins for pipeline use and admin.
+// metrics is optional; when set it records auth decisions.
+// metricsHandler is optional; when set, GET /metrics is registered (e.g. promhttp.HandlerFor(reg, ...)).
+func New(cfg *config.Config, client *proxy.AgentClient, registry *pluginregistry.Registry, metrics observability.Metrics, metricsHandler http.Handler) *Server {
+	policyEngine := policy.NewWASMRuntime(policy.DefaultFallbackAllow)
+	resolver := &proxy.AgentPrincipalResolver{Client: client, CookieName: cfg.CookieName}
+	engine := &pkgproxy.DefaultEngine{
+		Resolver:    resolver,
+		Policy:      policyEngine,
+		UpstreamURL: cfg.UpstreamURL,
+		RequireAuth:  cfg.RequireAuth,
+		Metrics:     metrics,
+	}
 	s := &Server{
-		mux:    http.NewServeMux(),
-		cfg:    cfg,
-		client: client,
+		mux:            http.NewServeMux(),
+		cfg:            cfg,
+		engine:         engine,
+		registry:       registry,
+		metricsHandler: metricsHandler,
 	}
 	s.routes()
 	return s
 }
 
+// routes performs route assembly and request pipeline assembly: health/ready/live, admin, then proxy path prefix with engine middleware.
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	s.mux.HandleFunc("GET /livez", s.handleLivez)
+	if s.cfg.AdminSecret != "" {
+		s.mux.HandleFunc("GET /admin", s.handleAdmin)
+	}
+	if s.metricsHandler != nil {
+		s.mux.Handle("GET /metrics", s.metricsHandler)
+	}
 	prefix := s.cfg.ProxyPathPrefix
 	if prefix == "" {
 		prefix = "/"
 	}
+	handler := pkgproxy.Middleware(s.engine, s.cfg.UpstreamURL)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	if !strings.HasSuffix(prefix, "/") {
-		s.mux.Handle(prefix, s.proxyHandler())
+		s.mux.Handle(prefix, handler)
 	}
-	s.mux.Handle(prefix+"/", s.proxyHandler())
+	s.mux.Handle(prefix+"/", handler)
 }
 
-func (s *Server) proxyHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookieVal := ""
-		if c, _ := r.Cookie(s.cfg.CookieName); c != nil {
-			cookieVal = c.Value
-		}
-		resolve, err := s.client.Resolve(r.Context(), cookieVal)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if resolve == nil && s.cfg.RequireAuth {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"errors":[{"message":"unauthorized"}]}`))
-			return
-		}
-		var headers map[string]string
-		if resolve != nil {
-			headers = proxy.BuildUpstreamHeaders(s.cfg, resolve.AccessToken, resolve.Claims, resolve.TenantContext)
-		} else {
-			headers = make(map[string]string)
-		}
-		upstream, _ := url.Parse(s.cfg.UpstreamURL)
-		proxy := httputil.NewSingleHostReverseProxy(upstream)
-		proxy.Director = func(out *http.Request) {
-			out.URL.Scheme = upstream.Scheme
-			out.URL.Host = upstream.Host
-			out.URL.Path = singleJoiningSlash(upstream.Path, r.URL.Path)
-			if r.URL.RawQuery != "" {
-				out.URL.RawQuery = r.URL.RawQuery
-			}
-			out.Host = upstream.Host
-			for k, v := range r.Header {
-				if strings.EqualFold(k, "Cookie") {
-					continue
-				}
-				out.Header[k] = v
-			}
-			for k, v := range headers {
-				out.Header.Set(k, v)
-			}
-			out.RequestURI = ""
-		}
-		proxy.ModifyResponse = func(resp *http.Response) error {
-			return nil
-		}
-		proxy.ServeHTTP(w, r)
-	})
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
 }
 
-func singleJoiningSlash(a, b string) string {
-	a = strings.TrimSuffix(a, "/")
-	b = strings.TrimPrefix(b, "/")
-	if a == "" {
-		return "/" + b
+func (s *Server) handleLivez(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Admin-Secret") != s.cfg.AdminSecret {
+		w.WriteHeader(http.StatusForbidden)
+		return
 	}
-	if b == "" {
-		return a
+	out := map[string]any{
+		"config_summary":   s.proxyConfigSummary(),
+		"plugins":          s.pluginsList(),
+		"plugin_health":    s.pluginHealthList(r.Context()),
+		"policy_bundle":    s.policyBundleStatus(),
 	}
-	return a + "/" + b
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) proxyConfigSummary() map[string]any {
+	return map[string]any{
+		"upstream_url":      s.cfg.UpstreamURL,
+		"proxy_path_prefix": s.cfg.ProxyPathPrefix,
+		"require_auth":      s.cfg.RequireAuth,
+		"agent_url":         s.cfg.AgentURL,
+		"cookie_name":       s.cfg.CookieName,
+		"http_port":         s.cfg.HTTPPort,
+	}
+}
+
+func (s *Server) pluginsList() []map[string]any {
+	if s.registry == nil {
+		return nil
+	}
+	order := s.registry.StartupOrder()
+	if len(order) == 0 {
+		order = s.registry.AllPluginIDs()
+	}
+	var list []map[string]any
+	for _, id := range order {
+		reg, ok := s.registry.RegistrationFor(id)
+		if !ok {
+			continue
+		}
+		list = append(list, map[string]any{
+			"id": string(reg.Descriptor.ID), "kind": string(reg.Descriptor.Kind), "name": reg.Descriptor.Name,
+			"enabled": reg.Enabled, "state": string(reg.State),
+		})
+	}
+	return list
+}
+
+func (s *Server) pluginHealthList(ctx context.Context) []map[string]any {
+	if s.registry == nil {
+		return nil
+	}
+	order := s.registry.StartupOrder()
+	if len(order) == 0 {
+		order = s.registry.AllPluginIDs()
+	}
+	var out []map[string]any
+	for _, id := range order {
+		reg, ok := s.registry.RegistrationFor(id)
+		if !ok {
+			continue
+		}
+		entry := map[string]any{"plugin_id": string(id), "state": string(reg.State)}
+		if reg.Error != nil {
+			entry["error"] = reg.Error.Error()
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func (s *Server) policyBundleStatus() map[string]any {
+	eng, ok := s.engine.(*pkgproxy.DefaultEngine)
+	if !ok || eng == nil || eng.Policy == nil {
+		return map[string]any{"loaded": false, "message": "no policy engine"}
+	}
+	st, ok := eng.Policy.(policy.EngineWithStatus)
+	if !ok {
+		return map[string]any{"loaded": false, "message": "engine does not report status"}
+	}
+	return map[string]any{
+		"loaded":       st.Loaded(),
+		"bundle_path":  st.BundlePath(),
+	}
 }
 
 // Handler returns the HTTP handler.
