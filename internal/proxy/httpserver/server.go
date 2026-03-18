@@ -28,15 +28,16 @@ type Server struct {
 // registry is optional; when set it holds discovered/registered plugins for pipeline use and admin.
 // metrics is optional; when set it records auth decisions.
 // metricsHandler is optional; when set, GET /metrics is registered (e.g. promhttp.HandlerFor(reg, ...)).
-func New(cfg *config.Config, client *proxy.AgentClient, registry *pluginregistry.Registry, metrics observability.Metrics, metricsHandler http.Handler) *Server {
-	policyEngine := policy.NewWASMRuntime(policy.DefaultFallbackAllow)
+func New(cfg *config.Config, client *proxy.AgentClient, policyEngine policy.Engine, pipelinePlugins []pkgproxy.PipelinePlugin, registry *pluginregistry.Registry, metrics observability.Metrics, metricsHandler http.Handler, tracer observability.Tracer) *Server {
 	resolver := &proxy.AgentPrincipalResolver{Client: client, CookieName: cfg.CookieName}
 	engine := &pkgproxy.DefaultEngine{
 		Resolver:    resolver,
 		Policy:      policyEngine,
+		PipelinePlugins: pipelinePlugins,
 		UpstreamURL: cfg.UpstreamURL,
-		RequireAuth:  cfg.RequireAuth,
+		RequireAuth:  bool(cfg.RequireAuth),
 		Metrics:     metrics,
+		Tracer:      tracer,
 	}
 	s := &Server{
 		mux:            http.NewServeMux(),
@@ -108,7 +109,7 @@ func (s *Server) proxyConfigSummary() map[string]any {
 	return map[string]any{
 		"upstream_url":      s.cfg.UpstreamURL,
 		"proxy_path_prefix": s.cfg.ProxyPathPrefix,
-		"require_auth":      s.cfg.RequireAuth,
+		"require_auth":      bool(s.cfg.RequireAuth),
 		"agent_url":         s.cfg.AgentURL,
 		"cookie_name":       s.cfg.CookieName,
 		"http_port":         s.cfg.HTTPPort,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,9 +13,13 @@ import (
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy"
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy/config"
 	"github.com/ArmanAvanesyan/authsentinel/internal/proxy/httpserver"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/policy"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/plugindiscovery"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginapi"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginregistry"
+	pkgproxy "github.com/ArmanAvanesyan/authsentinel/pkg/proxy"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/plugins/builtin"
 	goconfig "github.com/ArmanAvanesyan/go-config/config"
 	"github.com/ArmanAvanesyan/go-config/format/json"
 	"github.com/ArmanAvanesyan/go-config/source/env"
@@ -36,6 +41,9 @@ func main() {
 	client := proxy.NewAgentClient(cfg.AgentURL, cfg.CookieName)
 
 	reg := pluginregistry.New()
+	if err := (&builtin.Registrar{}).RegisterBuiltins(context.Background(), reg); err != nil {
+		logger.Fatalf("register built-in plugins: %v", err)
+	}
 	if cfg.PluginsManifestDir != "" {
 		ctx := context.Background()
 		if err := plugindiscovery.DiscoverFromDir(ctx, reg, cfg.PluginsManifestDir, nil); err != nil {
@@ -46,7 +54,16 @@ func main() {
 	}
 
 	metrics, metricsHandler := observability.NewPrometheusMetrics(nil)
-	handler := httpserver.New(cfg, client, reg, metrics, metricsHandler).Handler()
+	tracer := observability.NewOTLPTracerFromEnv()
+	policyEngine, err := buildPolicyEngine(cfg)
+	if err != nil {
+		logger.Fatalf("policy engine: %v", err)
+	}
+	pipelinePlugins, err := buildPipelinePlugins(cfg, reg)
+	if err != nil {
+		logger.Fatalf("pipeline plugins: %v", err)
+	}
+	handler := httpserver.New(cfg, client, policyEngine, pipelinePlugins, reg, metrics, metricsHandler, tracer).Handler()
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
@@ -92,4 +109,75 @@ func loadConfig() (*config.Config, error) {
 	}
 	cfg.ApplyDefaults()
 	return &cfg, nil
+}
+
+func buildPolicyEngine(cfg *config.Config) (policy.Engine, error) {
+	fallback := policy.FallbackConfig{Allow: cfg.PolicyFallbackAllow != nil && *cfg.PolicyFallbackAllow}
+
+	switch cfg.PolicyEngine {
+	case config.PolicyEngineWASM:
+		if cfg.PolicyBundlePath == "" {
+			return policy.NewWASMRuntime(fallback), nil
+		}
+		loader := policy.NewBundleLoader(fallback)
+		return loader.LoadBundle(cfg.PolicyBundlePath)
+	case config.PolicyEngineRego:
+		eng := policy.NewRegoEngine(fallback)
+		if cfg.PolicyBundlePath != "" {
+			if err := eng.Load(cfg.PolicyBundlePath); err != nil {
+				return nil, err
+			}
+		}
+		return eng, nil
+	default:
+		// Should not happen due to ApplyDefaults+Validate, but keep a safe fallback.
+		return policy.NewWASMRuntime(fallback), nil
+	}
+}
+
+func buildPipelinePlugins(cfg *config.Config, reg *pluginregistry.Registry) ([]pkgproxy.PipelinePlugin, error) {
+	if reg == nil || len(cfg.PipelinePlugins) == 0 {
+		return nil, nil
+	}
+
+	ctx := context.Background()
+	out := make([]pkgproxy.PipelinePlugin, 0, len(cfg.PipelinePlugins))
+
+	for _, entry := range cfg.PipelinePlugins {
+		if entry.ID == "" {
+			continue
+		}
+		regEntry, ok := reg.RegistrationFor(pluginapi.PluginID(entry.ID))
+		if !ok || regEntry == nil {
+			return nil, fmt.Errorf("pipeline plugin %q not registered", entry.ID)
+		}
+
+		p, err := regEntry.Factory(ctx, regEntry.Descriptor)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline plugin %q factory: %w", entry.ID, err)
+		}
+		if p == nil {
+			return nil, fmt.Errorf("pipeline plugin %q factory returned nil", entry.ID)
+		}
+
+		if cp, ok := p.(pluginapi.ConfigurablePlugin); ok {
+			if err := cp.Configure(ctx, entry.Raw); err != nil {
+				return nil, fmt.Errorf("pipeline plugin %q configure: %w", entry.ID, err)
+			}
+		}
+		if sp, ok := p.(pluginapi.StartablePlugin); ok {
+			if err := sp.Start(ctx); err != nil {
+				return nil, fmt.Errorf("pipeline plugin %q start: %w", entry.ID, err)
+			}
+		}
+
+		pl, ok := p.(pluginapi.PipelinePlugin)
+		if !ok {
+			return nil, fmt.Errorf("pipeline plugin %q is not a PipelinePlugin", entry.ID)
+		}
+
+		out = append(out, pl)
+	}
+
+	return out, nil
 }

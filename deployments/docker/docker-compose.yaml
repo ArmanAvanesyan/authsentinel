@@ -7,6 +7,24 @@ services:
     image: redis:7-alpine
     ports: ["6379:6379"]
 
+  mockidp:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/mockidp/Dockerfile
+    image: authsentinel-mockidp:latest
+    environment:
+      MOCKIDP_LISTEN_ADDR: ":8082"
+      # Must match the agent's OIDC_ISSUER so token validation (iss claim) passes.
+      MOCKIDP_ISSUER: ${OIDC_ISSUER}
+      # These are the URLs the browser/curl will follow to.
+      MOCKIDP_AUTHORIZATION_ENDPOINT: "http://localhost:8082/authorize"
+      MOCKIDP_END_SESSION_ENDPOINT: "http://localhost:8082/logout"
+      # These are the URLs the agent container will call for token + jwks.
+      MOCKIDP_TOKEN_ENDPOINT: "http://mockidp:8082/token"
+      MOCKIDP_JWKS_URI: "http://mockidp:8082/jwks"
+      MOCKIDP_EXPIRES_IN_SECONDS: "10"
+    ports: ["8082:8082"]
+
   authsentinel-agent:
     build:
       context: ../..
@@ -18,11 +36,14 @@ services:
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       REDIS_URL: redis://redis:6379/0
-      COOKIE_NAME: __Host-ess_session
+      # Use a non-__Host cookie name for local HTTP E2E runs.
+      COOKIE_NAME: ess_session
       COOKIE_SIGNING_SECRET: ${SESSION_COOKIE_SIGNING_SECRET}
+      COOKIE_SECURE: false
+      COOKIE_SAME_SITE: "lax"
       APP_BASE_URL: ${APP_BASE_URL:-https://portal.example.com}
       HTTP_PORT: "8080"
-    depends_on: [redis]
+    depends_on: [redis, mockidp]
     ports: ["8080:8080"]
 
   authsentinel-proxy:
@@ -33,14 +54,17 @@ services:
     environment:
       UPSTREAM_URL: http://bff:8002
       PROXY_PATH_PREFIX: /graphql
-      REQUIRE_AUTH: "true"
+      REQUIRE_AUTH: true
       AGENT_URL: http://authsentinel-agent:8080
-      COOKIE_NAME: __Host-ess_session
+      COOKIE_NAME: ess_session
       HTTP_PORT: "8081"
     depends_on: [authsentinel-agent]
     ports: ["8081:8081"]
 
   bff:
-    image: alpine:3.19
+    build:
+      context: ../..
+      dockerfile: deployments/docker/bff/Dockerfile
+    image: authsentinel-bff:latest
     command: ["sleep", "infinity"]
     # Replace with your BFF image, e.g. platform-edge-bff:latest

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,7 +16,11 @@ import (
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/service"
 	"github.com/ArmanAvanesyan/authsentinel/internal/store/redis"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/cookie"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginapi"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginregistry"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/plugins/builtin"
 	goconfig "github.com/ArmanAvanesyan/go-config/config"
 	"github.com/ArmanAvanesyan/go-config/format/json"
 	"github.com/ArmanAvanesyan/go-config/source/env"
@@ -35,7 +41,11 @@ func main() {
 
 	ctx := context.Background()
 	layout := cfg.KeyLayout()
-	store, err := redis.New(ctx, cfg.RedisURL, layout)
+
+	metrics, metricsHandler := observability.NewPrometheusMetrics(nil)
+	tracer := observability.NewOTLPTracerFromEnv()
+
+	store, err := redis.New(ctx, cfg.RedisURL, layout, metrics)
 	if err != nil {
 		logger.Fatalf("redis: %v", err)
 	}
@@ -46,16 +56,30 @@ func main() {
 	}()
 
 	cookieManager := cookie.NewSignedManager(cfg.CookieSigningSecret)
-	jwks := token.NewHTTPJWKSSource(5 * time.Minute)
+	jwks := token.NewHTTPJWKSSource(5 * time.Minute, metrics)
 
-	svc, err := service.New(cfg, store.SessionStore(), store.PKCEStore(), store.RefreshLockStore(), cookieManager, jwks)
+	provider, err := buildProviderPlugin(cfg)
+	if err != nil {
+		logger.Fatalf("provider plugin: %v", err)
+	}
+
+	svc, err := service.New(
+		cfg,
+		store.SessionStore(),
+		store.PKCEStore(),
+		store.RefreshLockStore(),
+		cookieManager,
+		jwks,
+		provider,
+		tracer,
+	)
 	if err != nil {
 		logger.Fatalf("service: %v", err)
 	}
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: httpserver.New(svc, cfg, store).Handler(),
+		Handler: httpserver.New(svc, cfg, store, metricsHandler).Handler(),
 	}
 
 	go func() {
@@ -97,4 +121,54 @@ func loadConfig() (*config.Config, error) {
 	}
 	cfg.ApplyDefaults()
 	return &cfg, nil
+}
+
+func buildProviderPlugin(cfg *config.Config) (pluginapi.ProviderPlugin, error) {
+	ctx := context.Background()
+	reg := pluginregistry.New()
+	if err := (&builtin.Registrar{}).RegisterBuiltins(ctx, reg); err != nil {
+		return nil, err
+	}
+
+	id := strings.TrimSpace(cfg.ProviderPluginID)
+	if id == "" {
+		id = "provider:oidc"
+	} else if !strings.Contains(id, ":") {
+		id = "provider:" + id
+	}
+
+	regEntry, ok := reg.RegistrationFor(pluginapi.PluginID(id))
+	if !ok || regEntry == nil {
+		return nil, fmt.Errorf("provider plugin %q not registered", id)
+	}
+
+	p, err := regEntry.Factory(ctx, regEntry.Descriptor)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, fmt.Errorf("provider plugin %q factory returned nil", id)
+	}
+
+	provider, ok := p.(pluginapi.ProviderPlugin)
+	if !ok {
+		return nil, fmt.Errorf("provider plugin %q does not implement ProviderPlugin", id)
+	}
+
+	if cp, ok := p.(pluginapi.ConfigurablePlugin); ok {
+		providerCfg := map[string]any{
+			"issuer":        cfg.OIDCIssuer,
+			"client_id":    cfg.OIDCClientID,
+			"client_secret": cfg.OIDCClientSecret,
+			"redirect_uri":  cfg.OIDCRedirectURI,
+			"scopes":        cfg.OIDCScopesSlice(),
+			"claims_source": cfg.OIDCClaimsSource,
+			"audience":      cfg.OIDCAudience,
+		}
+		if err := cp.Configure(ctx, providerCfg); err != nil {
+			return nil, err
+		}
+	}
+
+	return provider, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 	"github.com/redis/go-redis/v9"
 )
@@ -14,20 +15,24 @@ import (
 type Store struct {
 	client *redis.Client
 	layout session.KeyLayout
+	metrics observability.Metrics
 }
 
 // New creates a Redis store. url is e.g. "redis://localhost:6379/0".
-func New(ctx context.Context, url string, layout session.KeyLayout) (*Store, error) {
+func New(ctx context.Context, url string, layout session.KeyLayout, metrics observability.Metrics) (*Store, error) {
 	opts, err := redis.ParseURL(url)
 	if err != nil {
 		return nil, fmt.Errorf("redis url: %w", err)
+	}
+	if metrics == nil {
+		metrics = observability.NopMetrics{}
 	}
 	client := redis.NewClient(opts)
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 		return nil, fmt.Errorf("redis ping: %w", err)
 	}
-	return &Store{client: client, layout: layout}, nil
+	return &Store{client: client, layout: layout, metrics: metrics}, nil
 }
 
 // Close closes the Redis client.
@@ -66,27 +71,42 @@ func (s *Store) getSession(ctx context.Context, sessionID string) (*session.Sess
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
+			s.metrics.SessionStoreOp("session_get", true)
 			return nil, nil
 		}
+		s.metrics.SessionStoreOp("session_get", false)
 		return nil, err
 	}
 	var sess session.Session
 	if err := json.Unmarshal(data, &sess); err != nil {
+		s.metrics.SessionStoreOp("session_get", false)
 		return nil, err
 	}
+	s.metrics.SessionStoreOp("session_get", true)
 	return &sess, nil
 }
 func (s *Store) setSession(ctx context.Context, sessionID string, sess *session.Session, ttlSeconds int) error {
 	key := s.layout.SessionKey(sessionID)
 	data, err := json.Marshal(sess)
 	if err != nil {
+		s.metrics.SessionStoreOp("session_set", false)
 		return err
 	}
 	ttl := time.Duration(ttlSeconds) * time.Second
-	return s.client.Set(ctx, key, data, ttl).Err()
+	if err := s.client.Set(ctx, key, data, ttl).Err(); err != nil {
+		s.metrics.SessionStoreOp("session_set", false)
+		return err
+	}
+	s.metrics.SessionStoreOp("session_set", true)
+	return nil
 }
 func (s *Store) deleteSession(ctx context.Context, sessionID string) error {
-	return s.client.Del(ctx, s.layout.SessionKey(sessionID)).Err()
+	if err := s.client.Del(ctx, s.layout.SessionKey(sessionID)).Err(); err != nil {
+		s.metrics.SessionStoreOp("session_del", false)
+		return err
+	}
+	s.metrics.SessionStoreOp("session_del", true)
+	return nil
 }
 
 type pkceStoreImpl Store
@@ -106,27 +126,42 @@ func (s *Store) getPKCE(ctx context.Context, state string) (*session.PKCEState, 
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
+			s.metrics.SessionStoreOp("pkce_get", true)
 			return nil, nil
 		}
+		s.metrics.SessionStoreOp("pkce_get", false)
 		return nil, err
 	}
 	var p session.PKCEState
 	if err := json.Unmarshal(data, &p); err != nil {
+		s.metrics.SessionStoreOp("pkce_get", false)
 		return nil, err
 	}
+	s.metrics.SessionStoreOp("pkce_get", true)
 	return &p, nil
 }
 func (s *Store) setPKCE(ctx context.Context, state string, p *session.PKCEState, ttlSeconds int) error {
 	key := s.layout.PKCEKey(state)
 	data, err := json.Marshal(p)
 	if err != nil {
+		s.metrics.SessionStoreOp("pkce_set", false)
 		return err
 	}
 	ttl := time.Duration(ttlSeconds) * time.Second
-	return s.client.Set(ctx, key, data, ttl).Err()
+	if err := s.client.Set(ctx, key, data, ttl).Err(); err != nil {
+		s.metrics.SessionStoreOp("pkce_set", false)
+		return err
+	}
+	s.metrics.SessionStoreOp("pkce_set", true)
+	return nil
 }
 func (s *Store) deletePKCE(ctx context.Context, state string) error {
-	return s.client.Del(ctx, s.layout.PKCEKey(state)).Err()
+	if err := s.client.Del(ctx, s.layout.PKCEKey(state)).Err(); err != nil {
+		s.metrics.SessionStoreOp("pkce_del", false)
+		return err
+	}
+	s.metrics.SessionStoreOp("pkce_del", true)
+	return nil
 }
 
 type refreshLockStoreImpl Store
@@ -142,10 +177,21 @@ func (s *Store) obtainRefreshLock(ctx context.Context, sessionID string, ttlSeco
 	key := s.layout.RefreshLockKey(sessionID)
 	ttl := time.Duration(ttlSeconds) * time.Second
 	result, err := s.client.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: ttl}).Result()
-	return result == "OK", err
+	acquired := result == "OK"
+	if err != nil {
+		s.metrics.SessionStoreOp("refresh_lock_obtain", false)
+		return false, err
+	}
+	s.metrics.SessionStoreOp("refresh_lock_obtain", acquired)
+	return acquired, nil
 }
 func (s *Store) releaseRefreshLock(ctx context.Context, sessionID string) error {
-	return s.client.Del(ctx, s.layout.RefreshLockKey(sessionID)).Err()
+	if err := s.client.Del(ctx, s.layout.RefreshLockKey(sessionID)).Err(); err != nil {
+		s.metrics.SessionStoreOp("refresh_lock_release", false)
+		return err
+	}
+	s.metrics.SessionStoreOp("refresh_lock_release", true)
+	return nil
 }
 
 // SetRevoked marks the given id (JTI or session ID) as revoked for the given TTL.

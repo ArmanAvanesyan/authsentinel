@@ -18,7 +18,7 @@ func TestSessionSetGetDelete(t *testing.T) {
 	}
 	ctx := context.Background()
 	layout := session.DefaultKeyLayout()
-	store, err := New(ctx, url, layout)
+	store, err := New(ctx, url, layout, nil)
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSetRevokedAndIsRevoked(t *testing.T) {
 	}
 	ctx := context.Background()
 	layout := session.DefaultKeyLayout()
-	store, err := New(ctx, url, layout)
+	store, err := New(ctx, url, layout, nil)
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCheckReplayAndRecordReplay(t *testing.T) {
 	}
 	ctx := context.Background()
 	layout := session.DefaultKeyLayout()
-	store, err := New(ctx, url, layout)
+	store, err := New(ctx, url, layout, nil)
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}

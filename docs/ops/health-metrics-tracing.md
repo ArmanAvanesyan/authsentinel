@@ -22,7 +22,7 @@ Both binaries serve:
 
 ## Metrics
 
-The **proxy** exposes **GET /metrics** in Prometheus format when the default observability wiring is used (see `cmd/proxy`). The agent does not expose a metrics endpoint by default; you can wire `pkg/observability.PrometheusMetrics` and a handler in `cmd/agent` if needed.
+Both the **proxy** and the **agent** expose **GET /metrics** in Prometheus format using the default wiring in `cmd/proxy` and `cmd/agent`.
 
 ### Metric names
 
@@ -33,7 +33,7 @@ The **proxy** exposes **GET /metrics** in Prometheus format when the default obs
 | `authsentinel_session_store_operations_total` | Counter | `operation` (get/set), `result` (ok/error) | Session store ops (when wired). |
 | `authsentinel_plugin_health_state` | Gauge | `plugin_id` | Plugin health (1=healthy, 0.5=degraded, 0=stopped). |
 
-Auth decision metrics are recorded by the proxy engine when `observability.Metrics` is set. JWKS and session store metrics require passing a `Metrics` implementation into the token JWKS source and session store (optional wiring in agent/service and store).
+Auth decision metrics are recorded by the proxy engine when `observability.Metrics` is set. JWKS cache hits/misses and session-store operations are recorded when the agent wires `observability.Metrics` into the JWKS source and Redis store (done in `cmd/agent`).
 
 ## Admin (guarded)
 
@@ -75,7 +75,16 @@ Wire a **Provider** (logger + metrics + tracer) in `cmd/agent` and `cmd/proxy` a
 
 ## Tracing
 
-Tracing is optional. The **Tracer** interface in `pkg/observability` allows starting spans with key-value attributes. Default is **NopTracer**. To add OpenTelemetry or another backend, implement **Tracer** and pass it via the observability provider.
+Tracing is optional. The **Tracer** interface in `pkg/observability` allows starting spans with key-value attributes. Default is **NopTracer**.
+
+### OTLP/OpenTelemetry (env-only)
+The repo includes an OTLP-backed tracer that is enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint (for example `http://localhost:4317`)
+- `OTEL_EXPORTER_OTLP_PROTOCOL`: optional, `grpc` (default) or `http/protobuf`
+- `OTEL_SERVICE_NAME`: optional service name (default `authsentinel`)
+
+Tracer initialization is best-effort: if OTLP env vars are missing (or initialization fails), tracing silently falls back to **NopTracer** and must not break auth flows.
 
 ## Deployment
 

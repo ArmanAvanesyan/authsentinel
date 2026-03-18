@@ -2,11 +2,38 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 )
+
+// FlexibleBool allows configuration values to be provided either as JSON booleans
+// (e.g. `true`) or as JSON strings (e.g. `"true"`), which is helpful for env->config loaders.
+type FlexibleBool bool
+
+func (b *FlexibleBool) UnmarshalJSON(data []byte) error {
+	var v bool
+	if err := json.Unmarshal(data, &v); err == nil {
+		*b = FlexibleBool(v)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "yes", "y":
+			*b = FlexibleBool(true)
+			return nil
+		case "false", "0", "no", "n":
+			*b = FlexibleBool(false)
+			return nil
+		default:
+			return fmt.Errorf("invalid flexible bool %q", s)
+		}
+	}
+	return fmt.Errorf("flexible bool: unsupported value %s", string(data))
+}
 
 // CommaStrings is a []string that unmarshals from a JSON string (comma-separated) or a JSON array.
 // Used for env vars like OIDC_SCOPES=openid,profile and YAML arrays.
@@ -58,7 +85,7 @@ type Config struct {
 	// Cookie
 	CookieName          string `json:"cookie_name"`
 	CookieSigningSecret string `json:"cookie_signing_secret"`
-	CookieSecure        bool   `json:"cookie_secure"`
+	CookieSecure        FlexibleBool `json:"cookie_secure"`
 	CookieSameSiteStr   string `json:"cookie_same_site"`
 	CookieDomain        string `json:"cookie_domain"`
 	// CookieSameSite is set in Validate() from CookieSameSiteStr.

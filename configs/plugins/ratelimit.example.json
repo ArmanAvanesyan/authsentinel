@@ -5,9 +5,24 @@
   "agent_url": "http://localhost:8080",
   "cookie_name": "__Host-ess_session",
   "http_port": "8081",
+
   "policy_engine": "wasm",
   "policy_bundle_path": "",
   "policy_fallback_allow": true,
+
+  "pipeline_plugins": [
+    {
+      "id": "pipeline:ratelimit",
+      "type": "ratelimit",
+      "raw": {
+        "name": "default",
+        "requests_per_minute": 60,
+        "burst": 10,
+        "key_strategy": "ip"
+      }
+    }
+  ],
+
   "headers_user_id_claim": "sub",
   "headers_email_claim": "email",
   "headers_name_claim": "name",
@@ -17,3 +32,4 @@
   "headers_tenant_id_claim": "",
   "headers_admin_role": "admin"
 }
+

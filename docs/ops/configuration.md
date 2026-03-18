@@ -25,7 +25,7 @@ If no file path is set, only environment variables are used. This keeps env-only
 | `configs/agent.example.json` | Agent: OIDC, Redis, session, cookie, HTTP, CORS. |
 | `configs/proxy.example.json` | Proxy: upstream URL, agent URL, header claim mapping. |
 | `configs/agent.example.yaml` | Same as agent JSON (for YAML-capable loaders). |
-| `configs/proxy.example.yaml` | Same as proxy JSON (for YAML-capable loaders). |
+| `configs/proxy.example.yaml` | Same as proxy JSON (for YAML-capable loaders). Includes policy engine keys. |
 
 Copy an example and adjust values. Required fields are validated at startup; see the example files and `internal/agent/config` / `internal/proxy/config` for the full set of keys.
 

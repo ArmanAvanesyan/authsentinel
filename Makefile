@@ -87,8 +87,6 @@ proto-generate:
 # E2E: start compose, wait for health, run test/e2e/playbook.sh, then compose down.
 # Requires: docker, docker-compose, curl. Set .env from deployments/docker/.env.example.
 e2e-docker:
-	@cd deployments/docker && docker-compose up -d && sleep 15; \
-	cd ../.. && bash test/e2e/playbook.sh; rc=$$?; \
-	cd deployments/docker && docker-compose down; exit $$rc
+	@powershell -NoProfile -ExecutionPolicy Bypass -Command "cd 'deployments/docker'; docker-compose up -d | Out-Null; Start-Sleep -Seconds 15; cd '../..'; & './test/e2e/playbook.ps1'; $$rc=$$LASTEXITCODE; cd 'deployments/docker'; docker-compose down | Out-Null; exit $$rc"
 
 

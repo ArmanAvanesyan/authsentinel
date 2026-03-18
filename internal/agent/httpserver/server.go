@@ -26,16 +26,19 @@ type Server struct {
 	cfg    *config.Config
 	cookie string
 	ping   Pinger // optional; used for /readyz
+	// metricsHandler is optional; when set, GET /metrics is registered.
+	metricsHandler http.Handler
 }
 
 // New constructs a new Server with the given service and config. If pinger is non-nil, /readyz will use it.
-func New(svc agent.Service, cfg *config.Config, pinger Pinger) *Server {
+func New(svc agent.Service, cfg *config.Config, pinger Pinger, metricsHandler http.Handler) *Server {
 	s := &Server{
 		mux:    http.NewServeMux(),
 		svc:    svc,
 		cfg:    cfg,
 		cookie: cfg.CookieName,
 		ping:   pinger,
+		metricsHandler: metricsHandler,
 	}
 	s.routes()
 	return s
@@ -47,6 +50,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /livez", s.handleLivez)
 	if s.cfg.AdminSecret != "" {
 		s.mux.HandleFunc("GET /admin", s.handleAdmin)
+	}
+	if s.metricsHandler != nil {
+		s.mux.Handle("GET /metrics", s.metricsHandler)
 	}
 	s.mux.HandleFunc("GET /login", s.handleLogin)
 	s.mux.HandleFunc("GET /callback", s.handleCallback)
@@ -193,7 +199,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if resp.ClearCookie {
 		// Clear cookie by setting MaxAge=-1 (handled by cookie manager in response)
 		w.Header().Set("Set-Cookie", s.cookie+"=; Path=/; Max-Age=0; HttpOnly")
-		if s.cfg.CookieSecure {
+		if bool(s.cfg.CookieSecure) {
 			w.Header().Add("Set-Cookie", s.cookie+"=; Path=/; Max-Age=0; HttpOnly; Secure")
 		}
 	}
@@ -208,13 +214,13 @@ func (s *Server) cookieOpts() (path, domain string, maxAge int, secure, httpOnly
 	path = "/"
 	domain = s.cfg.CookieDomain
 	maxAge = s.cfg.SessionTTLSeconds
-	secure = s.cfg.CookieSecure
+	secure = bool(s.cfg.CookieSecure)
 	httpOnly = true
 	sameSite = "Lax"
 	switch s.cfg.CookieSameSite {
-	case 1: // http.SameSiteStrictMode
+	case http.SameSiteStrictMode:
 		sameSite = "Strict"
-	case 2: // http.SameSiteNoneMode
+	case http.SameSiteNoneMode:
 		sameSite = "None"
 	}
 	return path, domain, maxAge, secure, httpOnly, sameSite
@@ -284,7 +290,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.ClearCookie {
 		w.Header().Set("Set-Cookie", s.cookie+"=; Path=/; Max-Age=0; HttpOnly")
-		if s.cfg.CookieSecure {
+	if bool(s.cfg.CookieSecure) {
 			w.Header().Add("Set-Cookie", s.cookie+"=; Path=/; Max-Age=0; HttpOnly; Secure")
 		}
 	}

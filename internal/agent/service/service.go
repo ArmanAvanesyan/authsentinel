@@ -14,6 +14,8 @@ import (
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/oidc"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/agent"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/cookie"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginapi"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
 )
@@ -21,38 +23,54 @@ import (
 // Service implements agent.Service.
 type Service struct {
 	cfg         *config.Config
-	oidc        *oidc.Client
+	provider    pluginapi.ProviderPlugin
 	jwks        token.JWKSSource
 	sessions    session.SessionStore
 	pkce        session.PKCEStore
 	refreshLock session.RefreshLockStore
 	cookie      cookie.Manager
 	cookieOpts  cookie.CookieOptions
+	tracer      observability.Tracer
 }
 
 // New creates an agent Service.
-func New(cfg *config.Config, sessions session.SessionStore, pkce session.PKCEStore, refreshLock session.RefreshLockStore, cookieManager cookie.Manager, jwks token.JWKSSource) (*Service, error) {
+func New(
+	cfg *config.Config,
+	sessions session.SessionStore,
+	pkce session.PKCEStore,
+	refreshLock session.RefreshLockStore,
+	cookieManager cookie.Manager,
+	jwks token.JWKSSource,
+	provider pluginapi.ProviderPlugin,
+	tracer observability.Tracer,
+) (*Service, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	if provider == nil {
+		return nil, fmt.Errorf("provider is required")
 	}
 	opts := cookie.CookieOptions{
 		Path:     "/",
 		Domain:   cfg.CookieDomain,
-		Secure:   cfg.CookieSecure,
+		Secure:   bool(cfg.CookieSecure),
 		HTTPOnly: true,
 		SameSite: cfg.CookieSameSite,
 		MaxAge:   cfg.SessionTTLSeconds,
 	}
-	oidcClient := oidc.NewClient(cfg.OIDCIssuer, cfg.OIDCClientID, cfg.OIDCClientSecret, cfg.OIDCRedirectURI, cfg.OIDCScopes, cfg.OIDCAudience)
+	if tracer == nil {
+		tracer = observability.NopTracer{}
+	}
 	return &Service{
 		cfg:         cfg,
-		oidc:        oidcClient,
+		provider:    provider,
 		jwks:        jwks,
 		sessions:    sessions,
 		pkce:        pkce,
 		refreshLock: refreshLock,
 		cookie:      cookieManager,
 		cookieOpts:  opts,
+		tracer:      tracer,
 	}, nil
 }
 
@@ -78,6 +96,9 @@ func (s *Service) Session(ctx context.Context, req agent.SessionRequest) (*agent
 
 // LoginStart implements agent.Service.
 func (s *Service) LoginStart(ctx context.Context, req agent.LoginStartRequest) (*agent.LoginStartResponse, error) {
+	ctx, span := s.tracer.StartSpan(ctx, "agent.login_start", "redirect_to", req.RedirectTo)
+	defer span.End()
+
 	redirectTo := ValidateRedirect(req.RedirectTo, s.cfg.AppBaseURL, s.cfg.AllowedRedirectOrigins, s.cfg.AllowedRedirectPaths)
 	if redirectTo == "" && req.RedirectTo != "" {
 		redirectTo = s.cfg.AppBaseURL
@@ -85,14 +106,19 @@ func (s *Service) LoginStart(ctx context.Context, req agent.LoginStartRequest) (
 	if redirectTo == "" {
 		redirectTo = s.cfg.AppBaseURL
 	}
+	_, pkceSpan := s.tracer.StartSpan(ctx, "agent.pkce_generate")
 	verifier, challenge, nonce, err := oidc.GeneratePKCE()
 	if err != nil {
+		pkceSpan.End()
 		return nil, err
 	}
 	state, err := oidc.GenerateState()
 	if err != nil {
+		pkceSpan.End()
 		return nil, err
 	}
+	pkceSpan.End()
+	_, pkceStoreSpan := s.tracer.StartSpan(ctx, "agent.pkce_store_set")
 	err = s.pkce.Set(ctx, state, &session.PKCEState{
 		State:         state,
 		CodeVerifier:  verifier,
@@ -101,17 +127,25 @@ func (s *Service) LoginStart(ctx context.Context, req agent.LoginStartRequest) (
 		RedirectTo:    redirectTo,
 	}, s.cfg.SessionPKCETTLSeconds)
 	if err != nil {
+		pkceStoreSpan.End()
 		return nil, err
 	}
-	authURL, err := s.oidc.AuthURL(ctx, state, challenge, nonce)
+	pkceStoreSpan.End()
+	_, authURLSpan := s.tracer.StartSpan(ctx, "agent.oidc_authorization_url")
+	authURL, err := s.provider.AuthorizationURL(ctx, state, challenge, nonce, nil)
 	if err != nil {
+		authURLSpan.End()
 		return nil, err
 	}
+	authURLSpan.End()
 	return &agent.LoginStartResponse{RedirectURL: authURL}, nil
 }
 
 // LoginEnd implements agent.Service.
 func (s *Service) LoginEnd(ctx context.Context, req agent.LoginEndRequest) (*agent.LoginEndResponse, error) {
+	ctx, span := s.tracer.StartSpan(ctx, "agent.login_end", "state_present", req.State != "", "code_present", req.Code != "")
+	defer span.End()
+
 	if req.Error != "" {
 		redirectURL := s.cfg.AppBaseURL + s.cfg.LoginErrorRedirectPath
 		return &agent.LoginEndResponse{RedirectURL: redirectURL, ClearCookie: true}, nil
@@ -120,26 +154,35 @@ func (s *Service) LoginEnd(ctx context.Context, req agent.LoginEndRequest) (*age
 		redirectURL := s.cfg.AppBaseURL + s.cfg.LoginErrorRedirectPath
 		return &agent.LoginEndResponse{RedirectURL: redirectURL, ClearCookie: true}, nil
 	}
+	_, pkceGetSpan := s.tracer.StartSpan(ctx, "agent.pkce_get")
 	p, err := s.pkce.Get(ctx, req.State)
 	if err != nil || p == nil {
+		pkceGetSpan.End()
 		redirectURL := s.cfg.AppBaseURL + s.cfg.LoginErrorRedirectPath
 		return &agent.LoginEndResponse{RedirectURL: redirectURL, ClearCookie: true}, nil
 	}
+	pkceGetSpan.End()
 	_ = s.pkce.Delete(ctx, req.State)
-	tr, err := s.oidc.Exchange(ctx, req.Code, p.CodeVerifier)
+	_, exchangeSpan := s.tracer.StartSpan(ctx, "agent.oidc_exchange_code")
+	tr, err := s.provider.ExchangeCode(ctx, req.Code, p.CodeVerifier, s.cfg.OIDCRedirectURI)
 	if err != nil {
+		exchangeSpan.End()
 		redirectURL := s.cfg.AppBaseURL + s.cfg.LoginErrorRedirectPath
 		return &agent.LoginEndResponse{RedirectURL: redirectURL, ClearCookie: true}, nil
 	}
+	exchangeSpan.End()
 	audience := s.cfg.OIDCAudience
 	if audience == "" {
 		audience = s.cfg.OIDCClientID
 	}
+	_, validateSpan := s.tracer.StartSpan(ctx, "agent.token_validate_id_token")
 	principal, err := token.ValidateIDToken(ctx, tr.IDToken, s.jwks, s.cfg.OIDCIssuer, audience, p.Nonce)
 	if err != nil {
+		validateSpan.End()
 		redirectURL := s.cfg.AppBaseURL + s.cfg.LoginErrorRedirectPath
 		return &agent.LoginEndResponse{RedirectURL: redirectURL, ClearCookie: true}, nil
 	}
+	validateSpan.End()
 	expiresAt := time.Now().Unix() + int64(tr.ExpiresIn)
 	if tr.ExpiresIn <= 0 {
 		expiresAt = time.Now().Add(24 * time.Hour).Unix()
@@ -164,17 +207,23 @@ func (s *Service) LoginEnd(ctx context.Context, req agent.LoginEndRequest) (*age
 		ExpiresAt:    expiresAt,
 		Claims:       claims,
 	}
+	_, sessionSetSpan := s.tracer.StartSpan(ctx, "agent.session_store_set")
 	err = s.sessions.Set(ctx, sessID, sess, s.cfg.SessionTTLSeconds)
 	if err != nil {
+		sessionSetSpan.End()
 		return nil, err
 	}
+	sessionSetSpan.End()
 	if s.cfg.PostLoginWebhookURL != "" {
 		_ = s.callPostLoginWebhook(ctx, s.cfg.PostLoginWebhookURL, sessID, principal.Subject, getClaimString(claims, "email"), claims, req.Host)
 	}
+	_, cookieEncodeSpan := s.tracer.StartSpan(ctx, "agent.cookie_encode_session_id")
 	cookieValue, err := s.cookie.Encode(sessID)
 	if err != nil {
+		cookieEncodeSpan.End()
 		return nil, err
 	}
+	cookieEncodeSpan.End()
 	redirectURL := ValidateRedirect(p.RedirectTo, s.cfg.AppBaseURL, s.cfg.AllowedRedirectOrigins, s.cfg.AllowedRedirectPaths)
 	if redirectURL == "" {
 		redirectURL = s.cfg.AppBaseURL
@@ -219,6 +268,9 @@ func (s *Service) callPostLoginWebhook(ctx context.Context, url, sessionID, subj
 
 // Refresh implements agent.Service.
 func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent.RefreshResponse, error) {
+	ctx, span := s.tracer.StartSpan(ctx, "agent.refresh")
+	defer span.End()
+
 	if req.SessionCookie == "" {
 		return nil, fmt.Errorf("no session cookie")
 	}
@@ -226,10 +278,13 @@ func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent
 	if err := s.cookie.Decode(req.SessionCookie, &sessionID); err != nil {
 		return nil, fmt.Errorf("invalid cookie")
 	}
+	_, sessionGetSpan := s.tracer.StartSpan(ctx, "agent.session_store_get")
 	sess, err := s.sessions.Get(ctx, sessionID)
 	if err != nil || sess == nil {
+		sessionGetSpan.End()
 		return nil, fmt.Errorf("session not found")
 	}
+	sessionGetSpan.End()
 	if sess.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh token")
 	}
@@ -237,15 +292,21 @@ func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent
 	if !sess.NeedsRefresh(now, s.cfg.SessionRefreshEarlySeconds) {
 		return &agent.RefreshResponse{}, nil
 	}
+	_, lockSpan := s.tracer.StartSpan(ctx, "agent.refresh_lock_obtain")
 	ok, err := s.refreshLock.Obtain(ctx, sessionID, s.cfg.SessionRefreshLockTTLSeconds)
 	if err != nil || !ok {
+		lockSpan.End()
 		return &agent.RefreshResponse{}, nil
 	}
+	lockSpan.End()
 	defer func() { _ = s.refreshLock.Release(ctx, sessionID) }()
-	tr, err := s.oidc.Refresh(ctx, sess.RefreshToken)
+	_, providerRefreshSpan := s.tracer.StartSpan(ctx, "agent.oidc_refresh")
+	tr, err := s.provider.Refresh(ctx, sess.RefreshToken)
 	if err != nil {
+		providerRefreshSpan.End()
 		return nil, fmt.Errorf("refresh failed: %w", err)
 	}
+	providerRefreshSpan.End()
 	expiresAt := time.Now().Unix() + int64(tr.ExpiresIn)
 	if tr.ExpiresIn <= 0 {
 		expiresAt = time.Now().Add(24 * time.Hour).Unix()
@@ -261,19 +322,27 @@ func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent
 		if aud == "" {
 			aud = s.cfg.OIDCClientID
 		}
+		_, validateSpan := s.tracer.StartSpan(ctx, "agent.token_validate_id_token_refresh")
 		principal, err := token.ValidateIDToken(ctx, tr.IDToken, s.jwks, s.cfg.OIDCIssuer, aud, "")
 		if err == nil && principal.Claims != nil {
 			sess.Claims = principal.Claims
 		}
+		validateSpan.End()
 	}
+	_, sessionSetSpan := s.tracer.StartSpan(ctx, "agent.session_store_set")
 	err = s.sessions.Set(ctx, sessionID, sess, s.cfg.SessionTTLSeconds)
 	if err != nil {
+		sessionSetSpan.End()
 		return nil, err
 	}
+	sessionSetSpan.End()
+	_, cookieEncodeSpan := s.tracer.StartSpan(ctx, "agent.cookie_encode_session_id")
 	cookieValue, err := s.cookie.Encode(sessionID)
 	if err != nil {
+		cookieEncodeSpan.End()
 		return nil, err
 	}
+	cookieEncodeSpan.End()
 	return &agent.RefreshResponse{
 		SetCookieValue: cookieValue,
 		Refreshed:      true,
@@ -282,6 +351,9 @@ func (s *Service) Refresh(ctx context.Context, req agent.RefreshRequest) (*agent
 
 // Logout implements agent.Service.
 func (s *Service) Logout(ctx context.Context, req agent.LogoutRequest) (*agent.LogoutResponse, error) {
+	ctx, span := s.tracer.StartSpan(ctx, "agent.logout")
+	defer span.End()
+
 	// CSRF: for POST, check Origin/Referer against allowed
 	if req.Origin != "" || req.Referer != "" {
 		allowed := false
@@ -309,16 +381,21 @@ func (s *Service) Logout(ctx context.Context, req agent.LogoutRequest) (*agent.L
 	}
 	var idTokenHint string
 	if sessionID != "" {
+		_, sessGetSpan := s.tracer.StartSpan(ctx, "agent.session_store_get_logout")
 		sess, _ := s.sessions.Get(ctx, sessionID)
 		if sess != nil {
 			idTokenHint = sess.IDToken
 			_ = s.sessions.Delete(ctx, sessionID)
 		}
+		sessGetSpan.End()
 	}
-	endURL, err := s.oidc.EndSessionURL(ctx, idTokenHint, redirectTo)
+	_, endURLSpan := s.tracer.StartSpan(ctx, "agent.oidc_end_session")
+	endURL, err := s.provider.EndSessionURL(ctx, idTokenHint, redirectTo)
 	if err != nil {
+		endURLSpan.End()
 		return &agent.LogoutResponse{RedirectURL: redirectTo, ClearCookie: true}, nil
 	}
+	endURLSpan.End()
 	if endURL == "" {
 		return &agent.LogoutResponse{RedirectURL: redirectTo, ClearCookie: true}, nil
 	}

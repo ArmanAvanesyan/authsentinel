@@ -3,6 +3,9 @@
   "title": "AuthSentinel Agent config",
   "type": "object",
   "properties": {
+    "admin_secret": {
+      "type": "string"
+    },
     "allowed_redirect_origins": {
       "type": "array",
       "items": {
@@ -121,6 +124,7 @@
     "allowed_redirect_origins",
     "allowed_redirect_paths",
     "http_port",
+    "admin_secret",
     "post_login_webhook_url",
     "session_enrichment_api",
     "cors_allowed_origins",

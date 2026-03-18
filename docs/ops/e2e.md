@@ -2,21 +2,28 @@
 
 End-to-end tests run the full stack (agent, proxy, optional upstream and IdP) and assert key flows.
 
-## Smoke E2E (make e2e-docker)
+## Full-flow E2E (make e2e-docker)
 
 From the repo root, with Docker and docker-compose available:
 
-1. Copy `deployments/docker/.env.example` to `deployments/docker/.env` and set required variables (OIDC_ISSUER, OIDC_REDIRECT_URI, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, SESSION_COOKIE_SIGNING_SECRET, APP_BASE_URL).
+1. Copy `deployments/docker/.env.example` to `deployments/docker/.env`.
+2. The default `.env.example` is configured to use the in-repo deterministic mock OIDC IdP (see `cmd/mockidp`), so you do not need a real external IdP for E2E.
 2. Run: `make e2e-docker`
 
-This will:
+This will (full stack):
 
-- Start `docker-compose` in `deployments/docker` (Redis, authsentinel-agent, authsentinel-proxy, BFF placeholder).
+- Start `docker-compose` in `deployments/docker` (Redis, mock IdP, authsentinel-agent, authsentinel-proxy, BFF placeholder).
 - Wait for services to be up, then run `test/e2e/playbook.sh`.
-- The playbook checks: agent and proxy health endpoints return 200; proxy returns 401 for unauthenticated requests to the proxy path; agent `/login` returns 302 or 200.
+- The playbook checks:
+  - agent and proxy health endpoints return 200
+  - proxy returns 401 for unauthenticated requests to the proxy path
+  - agent login/callback sets a session cookie
+  - `GET /session` returns `is_authenticated=true` and `user.sub` matches the mock IdP
+  - `GET /refresh` sets a cookie (refresh happens)
+  - `GET /logout` clears the cookie and redirects
 - Tear down with `docker-compose down`.
 
-Requirements: `docker`, `docker-compose`, `curl`, and a valid `.env` (a real OIDC IdP for full login, or use placeholder values for smoke-only health checks).
+Requirements: `docker`, `docker-compose`, and `curl`. A mock IdP is started automatically by docker-compose.
 
 ## API-only E2E scenario
 

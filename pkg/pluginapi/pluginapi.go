@@ -112,13 +112,27 @@ type ProviderPlugin interface {
 	Plugin
 
 	// AuthorizationURL builds the authorization redirect URL for a login start request.
-	AuthorizationURL(ctx context.Context, state string, nonce string, extraParams map[string]string) (string, error)
+	// codeChallenge is used for PKCE.
+	AuthorizationURL(ctx context.Context, state string, codeChallenge string, nonce string, extraParams map[string]string) (string, error)
 
-	// ExchangeCode exchanges an authorization code for tokens and returns a normalized principal.
-	ExchangeCode(ctx context.Context, code string, redirectURI string) (*token.Principal, error)
+	// ExchangeCode exchanges an authorization code for raw OIDC tokens.
+	// codeVerifier is used for PKCE validation by the token endpoint.
+	ExchangeCode(ctx context.Context, code string, codeVerifier string, redirectURI string) (*ProviderTokens, error)
 
-	// Refresh refreshes the principal using a refresh token or session information, if supported.
-	Refresh(ctx context.Context, principal *token.Principal) (*token.Principal, error)
+	// Refresh refreshes raw OIDC tokens using a refresh token.
+	Refresh(ctx context.Context, refreshToken string) (*ProviderTokens, error)
+
+	// EndSessionURL builds the end-session redirect URL for logout flows.
+	EndSessionURL(ctx context.Context, idTokenHint, postLogoutRedirectURI string) (string, error)
+}
+
+// ProviderTokens are raw OIDC/OAuth tokens returned by ProviderPlugin implementations.
+// The agent runtime validates the ID token and extracts claims after receiving these.
+type ProviderTokens struct {
+	AccessToken  string
+	RefreshToken string
+	IDToken      string
+	ExpiresIn    int
 }
 
 // IntegrationPlugin represents a gateway integration (e.g. Caddy, Traefik, KrakenD).

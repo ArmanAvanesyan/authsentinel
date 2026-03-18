@@ -23,7 +23,7 @@ This document is the **single source of truth** for turning the AuthSentinel mon
 
 ### What is stub or placeholder
 
-- **pkg/policy**: Rego path is real; **wasm.go** is a TODO (no WASM runtime wired).
+- **pkg/policy**: WASM path is implemented (wazero); Rego path is stub. Policy bundle loading from config is not yet wired. See [milestone-gap-analysis.md](milestone-gap-analysis.md).
 - **tools/**, **scripts/**: README-only placeholders.
 - **packages/policy-bundles**: README-level; no real bundle layout or loader contract.
 
@@ -271,13 +271,13 @@ Execute in this order to minimize rework and deliver value incrementally.
 
 | Milestone | Scope |
 |-----------|--------|
-| **M1: Config and runtime core** | **Done**: go-config integrated; pkg/config removed; cmd/agent and cmd/proxy load via go-config; configs/ has agent and proxy example JSON/YAML. Remaining: finish pkg/cookie, pkg/token, pkg/session; finish internal/store/redis. |
-| **M2: Agent and proxy** | Finish pkg/agent and pkg/proxy; wire cmd/agent and cmd/proxy with go-config and observability; keep internal/agent and internal/proxy as orchestration only. |
-| **M3: Policy** | Finish pkg/policy: WASM host (Wasmtime or equivalent), bundle loader, decision model. |
+| **M1: Config and runtime core** | **Done**: go-config integrated; pkg/config removed; cmd/agent and cmd/proxy load via go-config; configs/ has agent and proxy example JSON/YAML; pkg/cookie, pkg/token, pkg/session, internal/store/redis implemented. Remaining: YAML loader in runtime (or document JSON-only); wire JWKS/session metrics. See [milestone-gap-analysis.md](milestone-gap-analysis.md). |
+| **M2: Agent and proxy** | **Done**: pkg/agent, pkg/proxy, cmd wiring, internal orchestration. Remaining: agent Prometheus metrics; optional OpenTelemetry tracing; structured logging in agent. See [milestone-gap-analysis.md](milestone-gap-analysis.md). |
+| **M3: Policy** | **Done**: WASM host (wazero), bundle loader, decision model. Remaining: wire PolicyBundlePath in proxy config; add sample WASM bundle; remove or implement Rego stub. See [milestone-gap-analysis.md](milestone-gap-analysis.md). |
 | **M4: Plugin platform** | **Done**: pkg/pluginapi, pluginregistry, plugindiscovery, pluginconfig, pluginhost; gateway adapters (Caddy, Traefik, KrakenD) as IntegrationPlugin; schemas/plugins; proxy/agent config and startup wired to registry and discovery. |
 | **M5: Contracts and SDKs** | **Done**: Proto definitions and buf workflow (Phase 4); Go/JS/Flutter SDKs implemented (Phase 5). |
 | **M5b: Gateway adapters** | **Done**: Phase 6 — pkg/plugins/{caddy,traefik,krakend} consumable (config, handler, translation, response mapping, docs, example configs, compatibility matrix). |
-| **M6: Ops and release** | configs + schemas tooling; deployments; health/metrics/tracing; release pipelines; documentation from Phase 11. |
+| **M6: Ops and release** | **Done**: configs + schemas tooling; deployments (docker); health/metrics (proxy/agent); release (GoReleaser in CI). Remaining: Helm charts. See [milestone-gap-analysis.md](milestone-gap-analysis.md). |
 
 ---
 

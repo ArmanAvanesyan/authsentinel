@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
 )
 
 // HTTPJWKSSource fetches JWKS from the OIDC issuer (via discovery) with an in-memory cache.
@@ -17,6 +19,7 @@ type HTTPJWKSSource struct {
 	cache  map[string]jwkSEntry
 	mu     sync.RWMutex
 	ttl    time.Duration
+	metrics observability.Metrics
 }
 
 type jwkSEntry struct {
@@ -30,14 +33,18 @@ type discoveryResponse struct {
 }
 
 // NewHTTPJWKSSource creates an HTTP JWKS source with the given cache TTL.
-func NewHTTPJWKSSource(cacheTTL time.Duration) *HTTPJWKSSource {
+func NewHTTPJWKSSource(cacheTTL time.Duration, metrics observability.Metrics) *HTTPJWKSSource {
 	if cacheTTL <= 0 {
 		cacheTTL = 5 * time.Minute
 	}
+	if metrics == nil {
+		metrics = observability.NopMetrics{}
+	}
 	return &HTTPJWKSSource{
-		client: &http.Client{Timeout: 10 * time.Second},
-		cache:  make(map[string]jwkSEntry),
-		ttl:    cacheTTL,
+		client:   &http.Client{Timeout: 10 * time.Second},
+		cache:    make(map[string]jwkSEntry),
+		ttl:      cacheTTL,
+		metrics:  metrics,
 	}
 }
 
@@ -51,6 +58,7 @@ func (s *HTTPJWKSSource) GetJWKS(ctx context.Context, issuer string) ([]byte, er
 	if e, ok := s.cache[cacheKey]; ok && time.Now().Before(e.exp) {
 		data := e.data
 		s.mu.RUnlock()
+		s.metrics.JWKSCacheHit(issuer)
 		return data, nil
 	}
 	s.mu.RUnlock()
@@ -58,8 +66,12 @@ func (s *HTTPJWKSSource) GetJWKS(ctx context.Context, issuer string) ([]byte, er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e, ok := s.cache[cacheKey]; ok && time.Now().Before(e.exp) {
+		s.metrics.JWKSCacheHit(issuer)
 		return e.data, nil
 	}
+
+	// Miss (or expired) -> fetch via discovery + JWKS.
+	s.metrics.JWKSCacheMiss(issuer)
 
 	jwksURI, err := s.fetchJWKSURI(ctx, issuer)
 	if err != nil {

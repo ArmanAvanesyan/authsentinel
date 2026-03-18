@@ -2,6 +2,8 @@ package policy
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	stdtesting "testing"
 
 	asTesting "github.com/ArmanAvanesyan/authsentinel/pkg/testing"
@@ -81,10 +83,44 @@ func TestWASMRuntimeFallbackNoModule(t *stdtesting.T) {
 	}
 }
 
-// TestPolicyEvaluate_WithBundle is a placeholder for when Rego/WASM bundle loading is implemented.
-// Intended behavior: load a minimal bundle (e.g. allow GET /public, deny otherwise), call Evaluate
-// with Input{Method: "GET", Path: "/public"} and assert Allow=true, StatusCode=200; with Path: "/admin"
-// assert Allow=false and appropriate StatusCode/Reason. Remove the skip and implement when bundle loader exists.
 func TestPolicyEvaluate_WithBundle(t *stdtesting.T) {
-	t.Skip("policy bundle loading not yet implemented; when Rego/WASM bundle loader exists, load minimal bundle and assert Evaluate returns expected Allow/StatusCode/Headers/Obligations for given Input")
+	t.Parallel()
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.rego")
+
+	// deny-by-default based on path: allow only /public.
+	regoSrc := `
+package authsentinel
+
+decision := {"allow": true, "status_code": 200, "reason": "", "headers": {}, "obligations": {}} {
+  input.Path == "/public"
+} else := {"allow": false, "status_code": 403, "reason": "denied by policy", "headers": {}, "obligations": {}} {
+  true
+}
+`
+	if err := os.WriteFile(p, []byte(regoSrc), 0o600); err != nil {
+		t.Fatalf("write rego: %v", err)
+	}
+
+	eng := NewRegoEngine(DefaultFallbackDeny)
+	if err := eng.Load(p); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	dec1, err := eng.Evaluate(context.Background(), Input{Protocol: "http", Method: "GET", Path: "/public"})
+	if err != nil {
+		t.Fatalf("Evaluate /public: %v", err)
+	}
+	if !dec1.Allow || dec1.StatusCode != 200 {
+		t.Fatalf("expected allow 200 for /public, got Allow=%v StatusCode=%d Reason=%q", dec1.Allow, dec1.StatusCode, dec1.Reason)
+	}
+
+	dec2, err := eng.Evaluate(context.Background(), Input{Protocol: "http", Method: "GET", Path: "/admin"})
+	if err != nil {
+		t.Fatalf("Evaluate /admin: %v", err)
+	}
+	if dec2.Allow || dec2.StatusCode != 403 {
+		t.Fatalf("expected deny 403 for /admin, got Allow=%v StatusCode=%d Reason=%q", dec2.Allow, dec2.StatusCode, dec2.Reason)
+	}
 }

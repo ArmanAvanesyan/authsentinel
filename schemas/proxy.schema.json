@@ -3,6 +3,9 @@
   "title": "AuthSentinel Proxy config",
   "type": "object",
   "properties": {
+    "admin_secret": {
+      "type": "string"
+    },
     "agent_url": {
       "type": "string"
     },
@@ -62,6 +65,15 @@
     "plugins_manifest_dir": {
       "type": "string"
     },
+    "policy_bundle_path": {
+      "type": "string"
+    },
+    "policy_engine": {
+      "type": "string"
+    },
+    "policy_fallback_allow": {
+      "type": "boolean"
+    },
     "proxy_path_prefix": {
       "type": "string"
     },
@@ -79,8 +91,12 @@
     "agent_url",
     "cookie_name",
     "http_port",
+    "policy_engine",
+    "policy_bundle_path",
+    "policy_fallback_allow",
     "pipeline_plugins",
     "plugins_manifest_dir",
+    "admin_secret",
     "headers_user_id_claim",
     "headers_email_claim",
     "headers_name_claim",

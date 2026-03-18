@@ -1,15 +1,64 @@
 package config
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// FlexibleBool allows configuration values to be provided either as JSON booleans
+// (e.g. `true`) or as JSON strings (e.g. `"true"`), which is helpful for env->config loaders.
+type FlexibleBool bool
+
+func (b *FlexibleBool) UnmarshalJSON(data []byte) error {
+	// First try normal bool.
+	var v bool
+	if err := json.Unmarshal(data, &v); err == nil {
+		*b = FlexibleBool(v)
+		return nil
+	}
+	// Then accept string forms.
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "yes", "y":
+			*b = FlexibleBool(true)
+			return nil
+		case "false", "0", "no", "n":
+			*b = FlexibleBool(false)
+			return nil
+		default:
+			return fmt.Errorf("invalid flexible bool %q", s)
+		}
+	}
+	return fmt.Errorf("flexible bool: unsupported value %s", string(data))
+}
+
+type PolicyEngine string
+
+const (
+	PolicyEngineWASM PolicyEngine = "wasm"
+	PolicyEngineRego PolicyEngine = "rego"
+)
 
 // Config holds configuration for the Proxy app (loaded via go-config from file + env).
 type Config struct {
 	UpstreamURL     string `json:"upstream_url"`
 	ProxyPathPrefix string `json:"proxy_path_prefix"`
-	RequireAuth     bool   `json:"require_auth"`
+	RequireAuth     FlexibleBool `json:"require_auth"`
 	AgentURL        string `json:"agent_url"`
 	CookieName      string `json:"cookie_name"`
 	HTTPPort        string `json:"http_port"`
+
+	// PolicyEngine selects the policy execution backend. Supported: "wasm" (default), "rego".
+	PolicyEngine PolicyEngine `json:"policy_engine"`
+	// PolicyBundlePath is the path to the policy bundle for the selected engine.
+	// For wasm: path to a .wasm file implementing the evaluate ABI.
+	// For rego: path to a .rego file.
+	PolicyBundlePath string `json:"policy_bundle_path"`
+	// PolicyFallbackAllow configures behavior when no policy is loaded or evaluation fails.
+	// When true fallback is allow; when false fallback is deny with 503.
+	PolicyFallbackAllow *bool `json:"policy_fallback_allow"`
 
 	// PipelinePlugins lists pipeline plugin configs (id, type, raw config). Used by proxy startup to configure and enable pipeline plugins from the registry.
 	PipelinePlugins []PipelinePluginEntry `json:"pipeline_plugins"`
@@ -38,6 +87,9 @@ func (c *Config) Validate() error {
 	if c.AgentURL == "" {
 		return errMissing("AGENT_URL")
 	}
+	if c.PolicyEngine != "" && c.PolicyEngine != PolicyEngineWASM && c.PolicyEngine != PolicyEngineRego {
+		return configError("POLICY_ENGINE (must be \"wasm\" or \"rego\")")
+	}
 	if !strings.HasPrefix(c.ProxyPathPrefix, "/") {
 		c.ProxyPathPrefix = "/" + c.ProxyPathPrefix
 	}
@@ -54,6 +106,14 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.HTTPPort == "" {
 		c.HTTPPort = "8081"
+	}
+	if c.PolicyEngine == "" {
+		c.PolicyEngine = PolicyEngineWASM
+	}
+	// Default fallback to allow to preserve existing behavior until policies are configured.
+	if c.PolicyFallbackAllow == nil {
+		v := true
+		c.PolicyFallbackAllow = &v
 	}
 	if c.HeaderUserIDClaim == "" {
 		c.HeaderUserIDClaim = "sub"

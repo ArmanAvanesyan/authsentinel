@@ -22,14 +22,40 @@ If no bundle is loaded or evaluation fails, the engine returns a **fallback** de
 
 **EngineWithStatus**: WASMRuntime implements **Loaded()** and **BundlePath()** so `/admin` can report policy bundle status.
 
-## Rego (placeholder)
+## Rego (OPA embedded)
 
-**pkg/policy** includes a **RegoEvaluator** placeholder for Rego/OPA-style bundles. It is not wired into the default proxy; the default path is WASM. Rego can be added later (embed OPA or call out) and used as an alternative engine implementation.
+The proxy can also run policies written in **Rego** using an embedded OPA evaluator (`pkg/policy.RegoEngine`).
+
+### Contract
+
+- **Package**: `package authsentinel`
+- **Query**: `data.authsentinel.decision`
+- **Result value**: a single object compatible with `pkg/policy.Decision`:
+  - `allow` (bool)
+  - `status_code` (number)
+  - `reason` (string, optional)
+  - `headers` (object string→string, optional)
+  - `obligations` (object, optional)
+
+### Input shape (important)
+
+AuthSentinel passes the Go struct `policy.Input` as the Rego `input`. Because the struct has **no JSON tags**, fields are exported as **capitalized keys**:
+
+- `input.Protocol`, `input.Method`, `input.Path`, `input.GraphQLOperation`, `input.GRPCService`, `input.GRPCMethod`, `input.Principal`, `input.Headers`
+
+## Proxy configuration
+
+Proxy config (`internal/proxy/config`) controls policy wiring:
+
+- `policy_engine`: `"wasm"` (default) or `"rego"`
+- `policy_bundle_path`: path to `.wasm` (WASM) or `.rego` (Rego)
+- `policy_fallback_allow`: boolean; when true fallback is allow(200), else deny(503)
 
 ## Bundle loading
 
 - **WASM**: `WASMRuntime.Load(path)` reads a WASM file and compiles/instantiates it; subsequent **Evaluate** calls use that module. Config can set a policy bundle path; proxy startup can load it and pass the engine to **DefaultEngine**.
 - **BundleLoader** (e.g. in pkg/policy): Can pre-compile WASM and pass a **wazero.CompiledModule** into **NewWASMRuntimeWithRuntime** for reuse.
+ - **Rego**: `RegoEngine.Load(path)` reads and compiles a `.rego` module; subsequent **Evaluate** calls execute `data.authsentinel.decision` with the normalized input.
 
 ## Security and sandboxing
 
@@ -37,6 +63,6 @@ WASM execution is sandboxed by wazero (no host access unless explicitly exported
 
 ## References
 
-- [pkg/policy](https://pkg.go.dev/github.com/ArmanAvanesyan/authsentinel/pkg/policy) — Engine, Input, Decision, WASMRuntime, RegoEvaluator.
+- [pkg/policy](https://pkg.go.dev/github.com/ArmanAvanesyan/authsentinel/pkg/policy) — Engine, Input, Decision, WASMRuntime, RegoEngine.
 - [Proxy pipeline](proxy-pipeline.md) — How the engine is used in the request flow.
 - [Implementation plan](../architecture/implementation-plan.md) — Phase 1.6 policy, WASM.

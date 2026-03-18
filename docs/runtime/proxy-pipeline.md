@@ -38,7 +38,13 @@ See [Caddy](../integration/caddy.md), [Traefik](../integration/traefik.md), [Kra
 
 ## Pipeline plugins (optional)
 
-**PipelinePlugin** (pkg/pluginapi) can participate in the request pipeline: it receives **proxy.Request** and optional **token.Principal** and returns **policy.Decision**. The proxy engine can be extended to run pipeline plugins before or after the main policy engine; current default is a single policy engine (WASM or fallback). Pipeline plugins are registered in the **pluginregistry** and can be wired in **internal/proxy** when enabled.
+If configured, the proxy engine runs **pipeline plugins** immediately after principal resolution and **before** calling the main policy engine:
+
+- Pipeline plugins are executed in the order from `pipeline_plugins` in the proxy config.
+- If any plugin returns a non-nil `*policy.Decision`, the proxy short-circuits and uses that decision directly (the main policy engine is skipped for that request).
+- If a plugin returns `nil`, execution continues to the next plugin; if all plugins return `nil`, the main policy engine runs as usual.
+
+The built-in `pipeline:ratelimit` plugin follows the recommended “deny-short-circuit” behavior: it returns `nil` on allow (so policy still governs allow/deny) and returns a `429` decision on limit exceeded.
 
 ## References
 

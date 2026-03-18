@@ -21,6 +21,9 @@ import (
 	"github.com/ArmanAvanesyan/authsentinel/internal/agent/service"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/agent"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/cookie"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginapi"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/pluginregistry"
+	"github.com/ArmanAvanesyan/authsentinel/pkg/plugins/builtin"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/session"
 	"github.com/ArmanAvanesyan/authsentinel/pkg/token"
 	"github.com/golang-jwt/jwt/v5"
@@ -228,7 +231,7 @@ func mustJWKS(t *testing.T, priv *rsa.PrivateKey) []byte {
 func TestAgent_LoginRedirect(t *testing.T) {
 	cfg, mockSrv, jwksSource, svc := setupAgentService(t)
 	defer mockSrv.Close()
-	srv := httpserver.New(svc, cfg, nil)
+	srv := httpserver.New(svc, cfg, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -245,7 +248,7 @@ func TestAgent_LoginRedirect(t *testing.T) {
 func TestAgent_LoginCallback_Session_Refresh_Logout(t *testing.T) {
 	cfg, mockSrv, _, svc := setupAgentService(t)
 	defer mockSrv.Close()
-	srv := httpserver.New(svc, cfg, nil)
+	srv := httpserver.New(svc, cfg, nil, nil)
 
 	// 1. Login start
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -370,7 +373,42 @@ func setupAgentService(t *testing.T) (*config.Config, *httptest.Server, token.JW
 	pkce := newInMemoryPKCEStore()
 	refreshLock := newInMemoryRefreshLockStore()
 	cookieManager := cookie.NewSignedManager(cfg.CookieSigningSecret)
-	svc, err := service.New(cfg, sessions, pkce, refreshLock, cookieManager, jwksSource)
+
+	// Create/configure provider plugin so agent service can use it for auth flows.
+	reg := pluginregistry.New()
+	if err := (&builtin.Registrar{}).RegisterBuiltins(context.Background(), reg); err != nil {
+		t.Fatalf("register builtins: %v", err)
+	}
+	regEntry, ok := reg.RegistrationFor(pluginapi.PluginID("provider:oidc"))
+	if !ok || regEntry == nil {
+		t.Fatalf("provider:oidc not registered")
+	}
+	p, err := regEntry.Factory(context.Background(), regEntry.Descriptor)
+	if err != nil {
+		t.Fatalf("provider factory: %v", err)
+	}
+	cp, ok := p.(pluginapi.ConfigurablePlugin)
+	if !ok {
+		t.Fatalf("provider does not implement ConfigurablePlugin")
+	}
+	providerCfg := map[string]any{
+		"issuer":         cfg.OIDCIssuer,
+		"client_id":     cfg.OIDCClientID,
+		"client_secret": cfg.OIDCClientSecret,
+		"redirect_uri":  cfg.OIDCRedirectURI,
+		"scopes":         cfg.OIDCScopesSlice(),
+		"claims_source": cfg.OIDCClaimsSource,
+		"audience":      cfg.OIDCAudience,
+	}
+	if err := cp.Configure(context.Background(), providerCfg); err != nil {
+		t.Fatalf("provider Configure: %v", err)
+	}
+	provider, ok := p.(pluginapi.ProviderPlugin)
+	if !ok {
+		t.Fatalf("provider does not implement ProviderPlugin")
+	}
+
+	svc, err := service.New(cfg, sessions, pkce, refreshLock, cookieManager, jwksSource, provider, nil)
 	if err != nil {
 		t.Fatalf("service.New: %v", err)
 	}

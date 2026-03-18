@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/ArmanAvanesyan/authsentinel/pkg/observability"
@@ -19,19 +20,43 @@ type PrincipalResolver interface {
 // If nil, DefaultEngine uses a default that sets X-User-Id, X-Roles, and obligation-derived headers.
 type HeaderBuilder func(principal *token.Principal, obligations map[string]any) map[string]string
 
+// PipelinePlugin is the minimal interface needed by the proxy engine to run
+// optional pipeline steps.
+//
+// We keep this interface local to pkg/proxy to avoid an import cycle with
+// pkg/pluginapi (which itself references pkg/proxy types).
+type PipelinePlugin interface {
+	Handle(ctx context.Context, req *Request, principal *token.Principal) (*policy.Decision, error)
+}
+
 // DefaultEngine implements Engine: normalizes request, resolves principal, evaluates policy, maps decision to response.
 type DefaultEngine struct {
 	Resolver      PrincipalResolver
 	Policy        policy.Engine
+	// PipelinePlugins is an optional list of pipeline plugins that can participate
+	// in the request flow. If any plugin returns a non-nil Decision, the engine
+	// short-circuits and uses that Decision instead of calling Policy.
+	PipelinePlugins []PipelinePlugin
 	UpstreamURL   string
 	RequireAuth   bool
 	HeaderBuilder HeaderBuilder
 	Metrics       observability.Metrics // optional; records auth decisions
+	Tracer        observability.Tracer  // optional; records best-effort spans
 }
 
 // Handle implements Engine.Handle.
 func (e *DefaultEngine) Handle(ctx context.Context, req *Request) (*Response, error) {
+	tr := e.Tracer
+	if tr == nil {
+		tr = observability.NopTracer{}
+	}
+	ctx, rootSpan := tr.StartSpan(ctx, "proxy.handle", "method", req.Method, "path", req.Path, "require_auth", e.RequireAuth)
+	defer rootSpan.End()
+
+	// Principal resolution: session/JWT -> principal.
+	_, principalSpan := tr.StartSpan(ctx, "proxy.principal_resolve")
 	principal, err := e.Resolver.Resolve(ctx, req)
+	principalSpan.End()
 	if err != nil {
 		return &Response{
 			Allow:      false,
@@ -47,28 +72,59 @@ func (e *DefaultEngine) Handle(ctx context.Context, req *Request) (*Response, er
 		}, nil
 	}
 
-	input := policy.Input{
-		Protocol:         req.Protocol,
-		Method:           req.Method,
-		Path:             req.Path,
-		GraphQLOperation: req.GraphQLOperation,
-		GRPCService:      req.GRPCService,
-		GRPCMethod:       req.GRPCMethod,
-		Principal:        principal,
-		Headers:          req.Headers,
+	// Optional pipeline plugins run before the main policy engine.
+	// If a plugin returns a decision, we short-circuit policy evaluation and use it.
+	var decision *policy.Decision
+	for i, p := range e.PipelinePlugins {
+		if p == nil {
+			continue
+		}
+		pluginType := reflect.TypeOf(p).String()
+		_, pSpan := tr.StartSpan(ctx, "proxy.pipeline_plugin", "plugin_index", i, "plugin_type", pluginType)
+		pd, err := p.Handle(ctx, req, principal)
+		pSpan.End()
+		if err != nil {
+			return &Response{
+				Allow:      false,
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       []byte(`{"errors":[{"message":"pipeline plugin error"}]}`),
+			}, nil
+		}
+		if pd != nil {
+			decision = pd
+			break
+		}
 	}
-	decision, err := e.Policy.Evaluate(ctx, input)
-	if err != nil {
-		return &Response{
-			Allow:      false,
-			StatusCode: http.StatusInternalServerError,
-			Body:       []byte(`{"errors":[{"message":"policy error"}]}`),
-		}, nil
+
+	// Main policy evaluation if no plugin decision was produced.
+	if decision == nil {
+		_, policySpan := tr.StartSpan(ctx, "proxy.policy_evaluate")
+		input := policy.Input{
+			Protocol:         req.Protocol,
+			Method:           req.Method,
+			Path:             req.Path,
+			GraphQLOperation: req.GraphQLOperation,
+			GRPCService:      req.GRPCService,
+			GRPCMethod:       req.GRPCMethod,
+			Principal:        principal,
+			Headers:          req.Headers,
+		}
+		decision, err = e.Policy.Evaluate(ctx, input)
+		policySpan.End()
+		if err != nil {
+			return &Response{
+				Allow:      false,
+				StatusCode: http.StatusInternalServerError,
+				Body:       []byte(`{"errors":[{"message":"policy error"}]}`),
+			}, nil
+		}
 	}
+
 	if decision == nil {
 		decision = &policy.Decision{Allow: false, StatusCode: http.StatusServiceUnavailable}
 	}
 
+	_, upstreamSpan := tr.StartSpan(ctx, "proxy.upstream_build")
 	resp := &Response{
 		Allow:      decision.Allow,
 		StatusCode: decision.StatusCode,
@@ -114,6 +170,7 @@ func (e *DefaultEngine) Handle(ctx context.Context, req *Request) (*Response, er
 	if e.Metrics != nil {
 		e.Metrics.AuthDecision(resp.Allow, resp.StatusCode)
 	}
+	upstreamSpan.End()
 	return resp, nil
 }
 
