@@ -112,7 +112,9 @@ func TestResolveAllByKind(t *testing.T) {
 	if len(integration) != 1 || integration[0].ID != "i1" {
 		t.Errorf("ResolveAllByKind(integration): got %v", integration)
 	}
-	r.Disable("p1")
+	if err := r.Disable("p1"); err != nil {
+		t.Fatalf("Disable(p1): %v", err)
+	}
 	pipeline = r.ResolveAllByKind(pluginapi.PluginKindPipeline)
 	if len(pipeline) != 1 || pipeline[0].ID != "p2" {
 		t.Errorf("after Disable(p1), ResolveAllByKind(pipeline): got %v", pipeline)
@@ -204,7 +206,9 @@ func TestStartupOrder_EmptyBeforeBuildDependencyGraph(t *testing.T) {
 	if len(order) != 0 {
 		t.Errorf("StartupOrder before BuildDependencyGraph: got %v", order)
 	}
-	r.BuildDependencyGraph()
+	if err := r.BuildDependencyGraph(); err != nil {
+		t.Fatalf("BuildDependencyGraph: %v", err)
+	}
 	order = r.StartupOrder()
 	if len(order) != 1 || order[0] != "x" {
 		t.Errorf("StartupOrder after Build: got %v", order)

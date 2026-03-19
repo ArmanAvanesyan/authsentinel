@@ -22,7 +22,11 @@ func TestSessionSetGetDelete(t *testing.T) {
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("redis close: %v", err)
+		}
+	}()
 
 	sessStore := store.SessionStore()
 	sessionID := "session-integration-test-1"
@@ -66,7 +70,11 @@ func TestSetRevokedAndIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("redis close: %v", err)
+		}
+	}()
 
 	id := "jti-revoked-test-123"
 	ttl := 10 * time.Second
@@ -103,7 +111,11 @@ func TestCheckReplayAndRecordReplay(t *testing.T) {
 	if err != nil {
 		t.Skipf("redis not available: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("redis close: %v", err)
+		}
+	}()
 
 	key := "replay-key-unique-456"
 	ttl := 5 * time.Second

@@ -35,11 +35,19 @@ func TestValidate_ProxyPathPrefix(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	os.Setenv("UPSTREAM_URL", "http://localhost:3000")
-	os.Setenv("AGENT_URL", "http://localhost:8080")
+	if err := os.Setenv("UPSTREAM_URL", "http://localhost:3000"); err != nil {
+		t.Fatalf("Setenv UPSTREAM_URL: %v", err)
+	}
+	if err := os.Setenv("AGENT_URL", "http://localhost:8080"); err != nil {
+		t.Fatalf("Setenv AGENT_URL: %v", err)
+	}
 	defer func() {
-		os.Unsetenv("UPSTREAM_URL")
-		os.Unsetenv("AGENT_URL")
+		if err := os.Unsetenv("UPSTREAM_URL"); err != nil {
+			t.Fatalf("Unsetenv UPSTREAM_URL: %v", err)
+		}
+		if err := os.Unsetenv("AGENT_URL"); err != nil {
+			t.Fatalf("Unsetenv AGENT_URL: %v", err)
+		}
 	}()
 
 	var cfg Config

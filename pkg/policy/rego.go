@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/v1/rego"
 )
 
 // RegoEngine runs policies written in Rego (OPA-style) embedded in the proxy.

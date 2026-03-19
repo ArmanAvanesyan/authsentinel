@@ -70,7 +70,9 @@ func (s *StdLogger) Info(msg string, keyvals ...any) {
 	if len(keyvals) > 0 {
 		s.appendKeyvals(&buf, keyvals)
 	}
-	s.log.Output(2, buf.String())
+	if err := s.log.Output(2, buf.String()); err != nil {
+		_ = err
+	}
 }
 
 func (s *StdLogger) Warn(msg string, keyvals ...any) {
@@ -84,7 +86,9 @@ func (s *StdLogger) Warn(msg string, keyvals ...any) {
 	if len(keyvals) > 0 {
 		s.appendKeyvals(&buf, keyvals)
 	}
-	s.log.Output(2, buf.String())
+	if err := s.log.Output(2, buf.String()); err != nil {
+		_ = err
+	}
 }
 
 func (s *StdLogger) Error(msg string, keyvals ...any) {
@@ -98,7 +102,9 @@ func (s *StdLogger) Error(msg string, keyvals ...any) {
 	if len(keyvals) > 0 {
 		s.appendKeyvals(&buf, keyvals)
 	}
-	s.log.Output(2, buf.String())
+	if err := s.log.Output(2, buf.String()); err != nil {
+		_ = err
+	}
 }
 
 func (s *StdLogger) With(keyvals ...any) Logger {

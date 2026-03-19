@@ -40,21 +40,49 @@ func TestKeyLayout(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	os.Setenv("OIDC_ISSUER", "https://idp.example.com")
-	os.Setenv("OIDC_REDIRECT_URI", "https://app/callback")
-	os.Setenv("OIDC_CLIENT_ID", "client")
-	os.Setenv("OIDC_CLIENT_SECRET", "secret")
-	os.Setenv("REDIS_URL", "redis://localhost:6379")
-	os.Setenv("COOKIE_SIGNING_SECRET", "cookie-secret")
-	os.Setenv("APP_BASE_URL", "https://app.example.com")
+	if err := os.Setenv("OIDC_ISSUER", "https://idp.example.com"); err != nil {
+		t.Fatalf("Setenv OIDC_ISSUER: %v", err)
+	}
+	if err := os.Setenv("OIDC_REDIRECT_URI", "https://app/callback"); err != nil {
+		t.Fatalf("Setenv OIDC_REDIRECT_URI: %v", err)
+	}
+	if err := os.Setenv("OIDC_CLIENT_ID", "client"); err != nil {
+		t.Fatalf("Setenv OIDC_CLIENT_ID: %v", err)
+	}
+	if err := os.Setenv("OIDC_CLIENT_SECRET", "secret"); err != nil {
+		t.Fatalf("Setenv OIDC_CLIENT_SECRET: %v", err)
+	}
+	if err := os.Setenv("REDIS_URL", "redis://localhost:6379"); err != nil {
+		t.Fatalf("Setenv REDIS_URL: %v", err)
+	}
+	if err := os.Setenv("COOKIE_SIGNING_SECRET", "cookie-secret"); err != nil {
+		t.Fatalf("Setenv COOKIE_SIGNING_SECRET: %v", err)
+	}
+	if err := os.Setenv("APP_BASE_URL", "https://app.example.com"); err != nil {
+		t.Fatalf("Setenv APP_BASE_URL: %v", err)
+	}
 	defer func() {
-		os.Unsetenv("OIDC_ISSUER")
-		os.Unsetenv("OIDC_REDIRECT_URI")
-		os.Unsetenv("OIDC_CLIENT_ID")
-		os.Unsetenv("OIDC_CLIENT_SECRET")
-		os.Unsetenv("REDIS_URL")
-		os.Unsetenv("COOKIE_SIGNING_SECRET")
-		os.Unsetenv("APP_BASE_URL")
+		if err := os.Unsetenv("OIDC_ISSUER"); err != nil {
+			t.Fatalf("Unsetenv OIDC_ISSUER: %v", err)
+		}
+		if err := os.Unsetenv("OIDC_REDIRECT_URI"); err != nil {
+			t.Fatalf("Unsetenv OIDC_REDIRECT_URI: %v", err)
+		}
+		if err := os.Unsetenv("OIDC_CLIENT_ID"); err != nil {
+			t.Fatalf("Unsetenv OIDC_CLIENT_ID: %v", err)
+		}
+		if err := os.Unsetenv("OIDC_CLIENT_SECRET"); err != nil {
+			t.Fatalf("Unsetenv OIDC_CLIENT_SECRET: %v", err)
+		}
+		if err := os.Unsetenv("REDIS_URL"); err != nil {
+			t.Fatalf("Unsetenv REDIS_URL: %v", err)
+		}
+		if err := os.Unsetenv("COOKIE_SIGNING_SECRET"); err != nil {
+			t.Fatalf("Unsetenv COOKIE_SIGNING_SECRET: %v", err)
+		}
+		if err := os.Unsetenv("APP_BASE_URL"); err != nil {
+			t.Fatalf("Unsetenv APP_BASE_URL: %v", err)
+		}
 	}()
 
 	var cfg Config
