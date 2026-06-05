@@ -1,3 +1,13 @@
+> # ⚠️ Deprecated — legacy ancestor of AccessGate
+>
+> **AuthSentinel** is preserved as **read-only historical lineage**. Active development has moved to
+> **[accessgate/accessgate](https://github.com/accessgate/accessgate)** — the canonical AccessGate core runtime
+> (binaries `accessgate-auth` / `accessgate-proxy`, Go module `github.com/accessgate/accessgate`).
+>
+> This is the canonical legacy home for the AuthSentinel lineage. Do not start new work here.
+
+---
+
 AuthSentinel Monorepo
 ======================
 
